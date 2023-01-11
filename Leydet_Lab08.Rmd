@@ -1,0 +1,941 @@
+---
+title: "Leydet_Lab08_Spatial_Data"
+author: "David Leydet"
+date: "2022-10-18"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: yeti
+---
+
+# **Introduction to Simple Features (sf)**
+
+```{r Lab-Setup, message=FALSE}
+
+library(ggplot2)
+library(plotly)
+library(raster)
+library(RColorBrewer)
+library(viridis)
+library(sf)
+library(kableExtra)
+library(maps)
+library(rgdal)
+
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab08")
+
+```
+
+```{r Data Import}
+
+path_to_data = system.file("shape/nc.shp", package = "sf")
+
+north_carolina = st_read(path_to_data, quiet = TRUE)
+
+#Subsetting North Carolina to include only the CNTY ID, NAME, AREA, and PERIMETER
+
+north_carolina = north_carolina [ , c("CNTY_ID", "NAME", "AREA", "PERIMETER")]
+
+north_carolina
+
+```
+
+
+```{r Creating Coordinates and Lines}
+
+##Creating two points in space using x,y coordinates:
+point_one = st_point(c(0,3))
+
+point_two = st_point(c(5,7))
+
+##Creating a line between two points:
+
+a_line = st_linestring(c(point_one, point_two))
+
+plot(a_line)
+     
+
+```
+
+```{r Geometry Typing}
+
+print(point_one)
+
+a_line
+
+##To determine the geometry of your simple feature
+st_geometry_type(a_line)
+
+```
+
+```{r Coordinate Reference System}
+##The CRS is the most important element of a simple feature - it gives us our spatial coordinates!
+
+##Visit spatialreference.org to determine the EPSG code for the datum you'd like to work with. 
+
+##4326 is the code for WGS84
+
+st_crs(4326)
+
+
+```
+
+```{r Bounding Box}
+
+##Defines the spatial extent of the data - min/max of x and y
+
+st_bbox(north_carolina)
+
+```
+
+# **Read and Write**
+
+
+```{r Reading in Spatial Data}
+##Reading in data
+
+NY8 = st_read(dsn = "../datafiles/NY_data/NY8_utm18.shp",
+              layer = "NY8_utm18",
+              drivers = "ESRI Shapefile")
+
+
+```
+
+```{r Alternative Reading Method}
+
+##Because it is a simple shapefile with the same data source and layer we can use the following syntax
+NY8 = st_read("../datafiles/NY_data/NY8_utm18.shp")
+
+```
+
+## **Converting non-spatial data to simple features**
+
+```{r Read in Climate Data}
+
+wna_climate = read.csv("../datafiles/WNAclimate.csv")
+
+head(wna_climate)
+
+```
+
+```{r Convert the Data to a Simple Feature}
+
+##Set as simple feature, using coordinates from the columns LONDD and LATDD, using coordinate system WGS84 (code - 4326)
+wna_climate = st_as_sf(wna_climate,
+                       coords = c("LONDD", "LATDD"),
+                       crs = 4326)
+
+wna_climate
+
+```
+
+```{r Plotting the Spatial Feature - Demo}
+
+myplot = ggplot(wna_climate)
+
+myplot +
+  geom_sf(color = "mediumseagreen", alpha = 0.4)
+```
+
+```{r Writing Spatial Data, eval = FALSE, message = FALSE}
+
+##Save this to disk as a shape file
+st_write(wna_climate, dsn = "../datafiles/wnaclim.shp")
+
+```
+
+# **Coordinate Reference System (CRS) Operations**
+
+**Ensure all of your data is in the same reference system!!**
+
+```{r Check the CRS}
+
+st_crs(NY8)
+
+```
+
+```{r Check the EPSG code}
+
+##Check the EPSG code for your data using $epsg syntax
+st_crs(NY8)$epsg
+
+st_crs(wna_climate)$epsg
+
+```
+
+
+```{r Alternative Method for CRS Check}
+##Another way to get the CRS
+
+format(st_crs(NY8))
+
+```
+
+## **Setting the CRS**
+
+```{r Set CRS}
+
+##Note: this should only be used when the simple feature is missing a CRS and you know what it is. It is NOT for re-projecting the sf object to a new coordinate system.
+
+st_crs(wna_climate) = 4326
+
+```
+
+
+## **Reprojecting CRS**
+
+
+```{r Reprojecting CRS}
+##The st_transform() function allows you to project your sf object to a new CRS. This is particularly useful if you have multiple data sources with different original coordinate systems.
+
+##As a reminder: when you read in spatial data, the first thing you should use is st_crs to check the CRS and st_transform to re-project if necessary.
+
+NY8 = st_transform(NY8, crs = 4326)
+
+##Check to see if it worked - the initial check before the transformation was "NA"
+st_crs(NY8)$epsg
+
+```
+
+
+# **Attribute Operations**
+
+```{r Attribute Class}
+
+oregon_tann = read_sf("../datafiles/oregon/oregontann.shp")
+
+class(oregon_tann)
+
+```
+
+
+```{r Attribute Table}
+
+oregon_tann %>%
+  kbl() %>%
+  kable_classic_2() %>%
+  scroll_box(width = "500px", height = "200px")
+
+```
+
+```{r Quick Oregon Plot}
+
+##Relook to add boundaries in ggplot
+
+ggplot(oregon_tann) +
+  geom_sf(color = "red", alpha = 0.5) +
+  xlab("Longitude") +
+  ylab("Latitude")
+
+
+```
+
+## **Select Columns**
+
+```{r Column Selection}
+##There are a couple of ways to do this. One way:
+
+oregon_tann2 = subset(oregon_tann, select = c(elevation, tann))
+
+##The geometry column is sticky and stays attached even when you subset
+names(oregon_tann2)
+
+
+```
+
+
+## **Filter Rows**
+
+```{r Row Selection}
+##Subsetting for rows/observation with an elevation over 1000 meters
+
+oregon_tann3 = subset(oregon_tann, subset = elevation > 1000)
+
+##state_bound = map('state', fill = TRUE, plot = FALSE) %>% st_as_sf()
+
+ggplot() +
+  geom_sf(data = oregon_tann, aes(color = "red", alpha = 0.9)) +
+  geom_sf(data = oregon_tann3, color = "red") +
+  #geom_sf(data = state_bound) +
+  #coord_sf(xlim = c(-125,-116), ylim = c(42,47)) +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme(legend.position = "none")
+
+```
+
+```{r Adding a Column}
+##Adding a column
+oregon_tann$rando = runif(n = nrow(oregon_tann))
+
+names(oregon_tann)
+
+```
+
+```{r Extracting a Column}
+##Extracting a column
+
+elevation = oregon_tann$elevation
+
+elevation[1:10]
+
+```
+
+## **Geometry**
+
+```{r Get Geometry}
+##Get the geometry
+geometry = oregon_tann$geometry
+
+geometry
+```
+
+
+```{r Drop Geometry}
+##Drop Geometry
+
+attributes = st_drop_geometry(oregon_tann)
+
+head(attributes)
+
+
+```
+
+
+# **Spatial Operations**
+
+## **Spatial Filter**
+```{r Spatial Filter}
+##Spatial Filter
+
+#Transform the coordinate system to UTM Zone 18N NAD83
+north_carolina = st_transform(north_carolina, crs = 26918)
+
+plot(st_geometry(north_carolina))
+
+```
+
+```{r Spatial Filter Continued}
+##Use st_sample to generate random points
+
+##Set seed is used to ensure the random generation is consistent for each iteration
+set.seed(1234)
+
+random_pnts = st_sample(north_carolina, size = 500)
+
+##Set as a simple feature (sf)
+random_pnts = st_as_sf(random_pnts)
+
+ggplot() +
+  geom_sf(data = north_carolina) +
+  geom_sf(data = random_pnts, color = "mediumorchid4", alpha = 0.5) +
+  theme_light() +
+  labs(title = "Random Sample - North Carolina",
+       subtitle = "By David, Abby, and Ellie Leydet")
+
+
+```
+
+
+```{r Subsetting Spatial Points}
+
+##Subsetting for the County Polygon of Pasquotank
+pasq = subset(north_carolina, NAME == "Pasquotank")
+
+
+##Run the st_filter function to filter the random points by pasq (the district)
+filtered_pnts = st_filter(random_pnts, pasq)
+
+myncplot = ggplot() +
+  geom_sf(data = north_carolina) +
+  theme_light() +
+  labs(title = "Random Sample - North Carolina",
+       subtitle = "By David, Abby, and Ellie Leydet")
+
+myncplot + geom_sf(data = filtered_pnts, color = "red", alpha = 0.5) +
+  labs(caption = "Pasquotank County")
+  
+  
+
+```
+
+## **Topological Relations**
+
+```{r Disjoint}
+##Points outside Pasquotank
+
+out.pasq = st_filter(random_pnts, pasq, .predicate = st_disjoint)
+
+##Editing the plot using the pasq subset to be filled a different color --> see geom_sf(data = pasq, fill = "grey19") line
+
+myncplot + geom_sf(data = out.pasq, color = "mediumorchid4", alpha = 0.5) +
+  geom_sf(data = pasq, fill = "grey19") +
+  labs(caption = "All points outside of Pasquotank County")
+
+```
+
+```{r Within a Distance Predicate}
+##Another useful predicate is st_is_within_distance, which requires that you pass an additional distance (dist) argument to the filter. The dist argument is in units specified by the CRS, in this case meters.
+
+fiftykm.filter = st_filter(random_pnts, pasq,
+                           .predicate = st_is_within_distance,
+                           dist = 50000)
+
+##Reversed the drawing order so the points appear over the different shaded county
+
+myncplot + geom_sf(data = pasq, fill = "snow1") + 
+  geom_sf(data = fiftykm.filter, color = "mediumorchid4", alpha = 0.5) +
+  labs(caption = "All points within 50 kilometers of Pasquotank County")
+
+
+```
+
+
+# **Geometric Operations**
+
+```{r Centroid, warning = FALSE}
+##Centroid
+
+center.of.pasq = st_centroid(pasq)
+
+ggplot() +
+  geom_sf(data = pasq) +
+  geom_sf(data = center.of.pasq, color = "red", pch = 2) +
+  theme_light()
+
+```
+
+```{r Buffer}
+##Buffer
+
+pasq.buffer = st_buffer(pasq, dist = 5000)
+
+ggplot() +
+  geom_sf(data = pasq.buffer, alpha = 0.8) +
+  geom_sf(data = pasq, color = "grey2", fill = "snow1") +
+  labs(title = "Pasquotank 5 kilometer Buffer") +
+  theme_light()
+
+
+```
+
+```{r Union}
+##Union - merge polygons together into one large feature
+
+nc.boundary = st_union(north_carolina)
+
+ggplot(data = nc.boundary) +geom_sf()
+
+
+```
+
+```{r Cast}
+##To cast a geometry is to change it from one geometry type to another. For example, to convert the boundary of North Carolina to points (the vertices of the polygon)
+
+nc.points = st_cast(nc.boundary, "POINT")
+
+ggplot() + geom_sf(data = nc.points, color = "mediumseagreen", alpha = 0.5 ) + theme_light()
+
+
+```
+
+
+```{r Convert to Linestrings}
+
+nc.lines = st_cast(nc.boundary, "MULTILINESTRING")
+
+ggplot() + geom_sf(data = nc.lines)
+
+```
+
+
+```{r}
+
+nc.lines2 = st_cast(nc.lines, "LINESTRING")
+
+ggplot() + geom_sf(data = nc.lines2)
+
+##If you can’t tell, it was broken into six lines: one for the mainland, and the other five for the ecological (and cultural) disaster known as the Outer Banks. How do we color by polygon?
+```
+
+
+# **Plotting**
+
+```{r ggplot}
+##ggplot
+
+NY8v2 <- st_read("../datafiles/NY_data/NY8_utm18.shp")
+
+binghamton = subset(NY8v2, AREANAME == "Binghamton city")
+
+bing.plot = ggplot() +
+  theme_bw()
+
+bing.plot + geom_sf(data = binghamton)
+
+```
+
+## **Multiple Geometries**
+
+```{r Multiple Geometries}
+
+## Create a new sf object that has Binghampton and its neighboring polygons
+bingies_neighbors = st_filter(NY8v2, binghamton)
+
+## Create a random sample
+bing.ran.points = st_sample(bingies_neighbors, size = 25)
+
+## Set the sample as a simple feature (sf)
+bing.ran.points = st_as_sf(bing.ran.points)
+
+## REMINDER - THE ORDER THAT THE GEOM_SF ARE WRITTEN IS THE ORDER THEY ARE DRAWN**
+
+bing.plot + geom_sf(data = bingies_neighbors) +
+  geom_sf(data = binghamton, fill = "deepskyblue") +
+  geom_sf(data = bing.ran.points, color = "brown1", alpha = 0.5, size = 2) 
+  
+
+```
+
+## **Plotting Attributes**
+
+```{r Plotting Attributes}
+
+##Attributes names
+
+names(binghamton)
+
+```
+
+
+```{r Plotting Attributes 2 - Population}
+
+## Plotting a thematic map by population
+bing.plot + geom_sf(data = binghamton, aes(fill = POP8))
+
+```
+
+
+```{r Plotting Attributes 3 - Exposure}
+
+## Plotting a thematic map by exposure
+bing.plot + geom_sf(data = binghamton, aes(fill = PEXPOSURE)) +
+  scale_fill_viridis(option = "cividis")
+
+```
+
+## **Coordinates**
+
+```{r Coordinate Change}
+
+## 
+bing.plot + geom_sf(data = binghamton, aes(fill = PEXPOSURE)) +
+  scale_fill_viridis(option = "cividis") +
+  coord_sf(datum = 26918)
+
+```
+
+
+```{r Zoom with Coordinates}
+
+## Make sure the CRS is set appropriately!!!!!
+## st_is_valid() check to see if the sf is valid
+## st_make_valid() may fix the sf if there are issues
+
+ggplot() + 
+  geom_sf(data = binghamton, aes(fill = PEXPOSURE)) +
+  scale_fill_viridis(option = "cividis") +
+   coord_sf(crs = 4326, xlim = c(-75.91, -75.88), ylim = c(42.10, 42.13)) +
+   theme_bw() +
+   theme(axis.text.x = element_text(angle = 90))
+
+```
+
+
+# **Rasters**
+
+```{r Generate a Random Raster}
+
+##Create an empty raster frame
+r = raster(nrow = 10, ncol = 10)
+
+## Fill it with random values from 0 to 1
+
+r[] = runif(n=100, min = 0, max = 1)
+
+r
+```
+
+
+```{r Basic R Plot}
+
+plot(r)
+
+```
+
+## **Read and Write Rasters**
+
+```{r Read and Write Rasters}
+
+air_temp = raster("../datafiles/air.mon.ltm.nc")
+
+## Note that we have only **read the first layer (January)**. R will tell you that it loaded the variable called air. To avoid this message you can specify this directly, which is important for files containing multiple variables:##
+
+```
+
+```{r Read and Write 2}
+
+air_temp = raster("../datafiles/air.mon.ltm.nc", varname = "air")
+
+air_temp
+```
+
+
+```{r Write Raster, eval = FALSE}
+
+writeRaster(air_temp, filename = "../datafiles/air_temp.tif")
+
+
+```
+
+
+## **Raster CRS**
+
+```{r Raster CRS}
+
+## Set CRS
+## Check out the PROJ4 for syntax. Go to the website!!
+## "+init=epsg:4326" can be used for rasters so you don't have to write out the full PROJ4 syntax!
+
+crs(air_temp) = "+proj=longlat +ellps=WGS84 +towgs84=0,0,0 +no_defs "
+
+## Check CRS
+crs(air_temp)
+
+```
+
+
+```{r Transform CRS}
+
+weird_crs = crs("+proj=tmerc +lat_0=0 +lon_0=15 +k=0.999923 +x_0=5500000 +y_0=0 +ellps=GRS80 +units=m +no_defs")
+
+air_temp_weird_crs = projectRaster(air_temp, crs = weird_crs)
+
+crs(air_temp_weird_crs)
+```
+
+
+```{r Basic Plotting}
+
+## Plotting
+
+plot(air_temp, main = "NCEP NCAR January LTM Tair")
+
+## Notice how the the the x axis starts at 0 and ends at 360
+```
+
+```{r Rotate the Longitude and Color Change}
+
+air_temp = rotate(air_temp)
+
+##Create a color palette with nine colors using color brewer
+
+my.pal = brewer.pal(n = 9, name = "OrRd")
+
+##Add country geometries
+
+countries = st_read("../datafiles/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp", 
+                    quiet = TRUE)
+
+## Run these lines together
+
+plot(air_temp,
+     main = "NCEP NCAR January LTM Tair",
+     col = my.pal)
+
+plot(st_geometry(countries), add = TRUE)
+
+```
+
+
+## **Summary Statistics**
+
+```{r Summary Stats}
+
+## The function cellStats() can be used to calculate most summary statistics for a raster layer. So to get the mean global temperature (and standard deviation):
+
+cellStats(air_temp, mean)
+
+cellStats(air_temp, sd)
+
+```
+
+
+## **Subset Rasters**
+
+```{r Subsetting Rasters}
+##If we want to use only a subset of the original raster layer, the function crop() will extract only the cells in a given region. This can be defined using another raster object or Spatial* object, or by defining an extent object:
+
+
+# Extent Method
+
+canada.ext = extent(c(xmin = -143,
+                      xmax = -50,
+                      ymin = 41,
+                      ymax = 84))
+
+
+canada_air_temp1 = crop(air_temp, canada.ext)
+
+
+# Spatial Method
+canada = subset(countries, NAME == "Canada")
+
+canada_air_temp2 = crop(air_temp, canada)
+
+##Plot both for comparison
+
+par(mfrow = c(1, 2))
+
+plot(canada_air_temp1, 
+     main = "NCEP NCAR January LTM Tair",
+     sub = "Extent Method",
+     col = my.pal)
+plot(st_geometry(canada), add = TRUE)
+
+
+plot(canada_air_temp2, 
+     main = "NCEP NCAR January LTM Tair",
+     sub = "Spatial Method",
+     col = my.pal)
+plot(st_geometry(canada), add = TRUE)
+
+
+```
+
+
+```{r Masking}
+
+## Note that crop subsets the original raster to the extent of Canada’s borders, rather than to the borders themselves. This is because rasters are always rectangular. You can ‘hide’ the values of raster cells outside of a polygon by using the mask function. The raster has to be rectangular, so this does not remove the cells outside the polygon. Rather, it sets their value to NA.
+
+canada_air_temp3 = mask(canada_air_temp2, mask = canada)
+
+plot(canada_air_temp3, 
+     main = "NCEP NCAR January LTM Tair", 
+     sub = "Masked Version",
+     col = my.pal)
+plot(st_geometry(canada), add = TRUE)
+
+```
+
+## **Extract Data**
+
+```{r Extracting Data}
+
+## Values can be extracted from individual locations (or sets of locations) using extract(). This can take a set of coordinates in matrix form, or use a Spatial* object. To get the January temperature of Salt Lake City:
+
+##Use long/lat for SLC. Gives value of the cell
+
+extract(air_temp, cbind(-111.9, 40.76))
+
+
+```
+
+
+```{r Extracting Data - 2}
+
+##By default this gives you the value of the cell in which the point falls. The value can equally be estimated by bilinear interpolation from the four closest cells with method='bilinear':
+
+extract(air_temp, cbind(-111.9, 40.76), method = "bilinear")
+
+
+```
+
+
+```{r Extracting Data - 3}
+
+##Using the wna climate samples locations to subset our data
+
+##Note: character. 'simple' or 'bilinear'. If 'simple' values for the cell a point falls in are returned. If 'bilinear' the returned values are interpolated from the values of the four nearest raster cells.
+
+## 	logical. If df=TRUE, results will be returned as a data.frame. The first column is a sequential ID, the other column(s) are the extracted values
+
+wna.air.temp.df = extract(air_temp,
+                          wna_climate,
+                          method = "bilinear",
+                          df = TRUE)
+
+head(wna.air.temp.df)
+```
+
+
+```{r Extract Data - 4}
+
+## Extracting pixels by polygons
+
+##Create the China Polygon
+china = subset(countries, NAME == "China")
+
+china.air.temp.df = extract(air_temp,
+                            china,
+                            df = TRUE)
+
+head(china.air.temp.df)
+
+```
+
+
+```{r Extract Data - 5}
+
+##Extracts the temperature data for China
+##When this function is used with a set of polygons, the output is in a list, but we can retrieve whatever we want from that list.
+
+##Help on this?
+
+two.countries = rbind(china, canada)
+
+china.tjan = extract(air_temp, two.countries)[[1]]
+
+hist(china.tjan)
+```
+
+
+```{r Extract Data - 6}
+
+##The extract() function also takes an argument fun. This allows you to calculate a summary statistic for each set of pixels that is extracted (i.e. one per polygon). Here, we’ll use this with countries to get an average value of January temperature. We add this back as a new column in the countries object, and then plot it:
+
+countries$Jan_Tmp = extract(air_temp, countries, fun = mean)[,1]
+
+country.temp = ggplot(countries) +
+  geom_sf(aes(fill = Jan_Tmp)) +
+  labs(fill = "Temperature",
+       title = "Mean January Temperature")
+
+ggplotly(country.temp)
+```
+
+## **Raster Stacks**
+
+```{r Raster Stacks}
+
+## A useful extension to the basic raster functions is the use of stacks. These are a stack of raster layers which represent different variables, but have the same spatial extent and resolution. 
+
+## Read in the stack
+air.temp.stk = stack("../datafiles/air.mon.ltm.nc", varname = "air")
+
+## Rotate the long to -18- to 180
+air.temp.stk = rotate(air.temp.stk)
+
+## Change my extent to
+myext = extent(c(-130, -60, 25, 50))
+
+## Crop the stack to the extent
+
+air.temp.stk = crop(air.temp.stk, myext)
+
+```
+
+
+```{r Subset the Stack}
+
+## Subset the first three stacks. Double check what [[]] means. I assume it is the first three stacks as opposed to picking the data out in a matrix
+
+air.temp.substk = air.temp.stk[[1:3]]
+
+air.temp.substk
+
+```
+
+
+```{r Stack Names}
+
+##Paste names to each stack. month.abb is built in to R
+##Potential mismatch between the initial names and the paste? For example X0000.12.30 is December, but now reads as Jan?
+
+names(air.temp.stk) = paste("TAS", month.abb)
+
+names(air.temp.stk)
+
+
+```
+
+
+```{r Raster Pull by Name}
+
+#Raster stack pull by name
+
+## Method 1
+
+air.temp.jan = air.temp.stk$TAS.Jan
+
+## Method 2
+
+air.temp.jan2 = air.temp.stk[["TAS.Jan"]]
+
+air.temp.jan
+
+```
+
+### **Plotting Stacks**
+
+```{r Plotting Stacks}
+
+## Plotting stacks. zlim syntax sets the same scale for each stack
+
+plot(air.temp.stk,
+     col = my.pal,
+     zlim = c(-35, 35))
+
+
+
+```
+
+
+```{r Adding Additional Spatial Data}
+
+## Turn countries into spatial data to add to plot
+## addfun Function to add additional items such as points or polygons to the plot (map). Typically containing statements like "points(xy); plot(polygons, add=TRUE)". This is particularly useful to add something to each map when plotting a multi-layer Raster* object.
+
+addBorder = function() {plot(as_Spatial(countries), add = TRUE)}
+
+plot(air.temp.stk,
+     col = my.pal,
+     zlim = c(-35, 35),
+     addfun = addBorder)
+
+```
+
+### **cellStats Function**
+
+```{r cellStats Function}
+
+#The cellStats() function now returns the mean (or other statistic) for all layers, allowing a quick look at the seasonal cycle of average air temperature.
+
+tavg = cellStats(air.temp.stk, mean)
+
+plot(1:12, tavg,
+     type = "l",
+     col = "red",
+     xlab = "Month",
+     ylab = "Average Temperature (Celsius)")
+```
+
+
+```{r Extract a Single Location}
+## Extract a single location
+## Colorado Springs 38.8339° N, 104.8214° W
+
+cos.tavg = extract(air.temp.stk, cbind(-104.82, 38.83), method = "bilinear")
+
+plot(1:12, cos.tavg,
+     type = "l",
+     col = "red",
+     xlab = "Month",
+     ylab = "Average Temperature (Celsius)",
+     main = "Average Colorado Springs Temperature")
+
+```
+
+

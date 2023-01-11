@@ -1,0 +1,421 @@
+---
+title: "Leydet Lab04 - Modeling II"
+author: "David Leydet"
+date: "2022-09-14"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: united
+---
+
+# GEOG6000 - Methods of Data Analysis
+
+
+
+```{r}
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab04") ##Set working directory
+
+```
+
+# Initial Scripting Practice Exercise
+
+```{r}
+irished = read.csv("../datafiles/irished.csv")
+irished$sex = factor(irished$sex,
+                     levels = c(1, 2),
+                     labels = c("Male", "Female")) ##changed 1 and 2 to male and female
+
+hist(irished$DVRT,
+     main = "DVRT",
+     breaks = 20,
+     xlab = "DVRT Scores",
+     col = "coral")
+
+##See the lab for saving this as a script then running it using the source() function
+```
+
+# Programming Flow
+
+```{r} 
+for (i in 1:10) { print(i) } #Simple loop - runs ten times printing "i"
+
+source("../datafiles/cointoss.r") #Coin toss loop see the script for the syntax and functions
+
+#Question on the loop syntax specifically the "runif" and "if" statement
+
+```
+
+# Creating your own functions
+
+```{r}
+mySD = function (x) { sqrt (var(x)) } #Creating a function to calculate SD
+mySD(irished$DVRT) #Calculates the same as the built in R function "sd"
+
+```
+
+# Multiple Linear Regression
+
+```{r}
+runoff = read.csv("../datafiles/SoCal_Runoff.csv")
+
+summary(runoff) #Basic summary statistics for the datafile
+pairs(runoff[ , -1]) #Useful for looking at the correlation between variables
+#[ , -1] syntax subtracts the first column from the plot
+
+```
+
+
+# Builing and Examining the Full Model
+
+```{r}
+runoff2 = runoff[ , -1] #*NOTE RUNNING THIS MULTIPLE TIMES WILL CONTINUE TO TAKE COLUMNS OUT!*
+runoff2.mod1 = lm(RUNOFF ~ . , data = runoff2) # . denotes full model with all the variables
+summary(runoff2.mod1)
+
+```
+
+
+```{r}
+anova(runoff2.mod1)
+
+```
+
+- After examining the model the $r^{2}$ value is high at approximately 0.91.
+- The coefficients that are significantly different from zero are AP3, OP2, and OP3. AP2 is away from zero in a negative direction which indicates that our model is potentially worse for including it as an explanation for runoff. Per the lecture this is due to the redundancy in this variable as it is spatially proximate to the other AP sites.
+- The _F_-test along with the p-values indicate that OP1, OP2, and AP1 are statistically significant in explaining runoff in this area when compared to the null, or simple, model. This indicates that the model fits "better" with those variables which is worth the increase in model complexity. AP3 and OP3 have positive _F_-statistics and statistically significant p-values, however, they are not as large compared to OP1, OP2, and AP1 which could give us a clue on the importance of those sites. 
+
+
+# Variance Inflation 
+
+Correlation Matrix 
+
+```{r}
+
+cor(runoff2)
+
+```
+
+## Correlation Plot Practice
+
+```{r}
+library(ggplot2)
+library(ggcorrplot) #Load the correlation plot package
+
+ggcorrplot(cor(runoff2), 
+           method = "square",
+           type = "full",
+           lab = TRUE,
+           colors = c("blue", "darksalmon", "firebrick"))
+
+```
+
+## VIF Function
+
+```{r}
+library(car)
+
+vif(runoff2.mod1) ##Remember values over 5 indicate collinearity and values over 10 mean it is definitely has a collinear relationship!
+
+```
+
+## Creating a second model
+
+This aids to reduce the effect of collinear variables on the model
+
+```{r}
+
+runoff2.mod2 = lm(RUNOFF ~ AP3 + OP3, data = runoff2)
+
+summary(runoff2.mod2)
+
+```
+
+# Comparing Models
+
+Based on the _F_-statistic and the degrees of freedom, it appears that model 2 (Runoff2.mod2) is the better model, despite having a slightly lower $r^2$ value. 
+
+```{r}
+
+anova(runoff2.mod1, runoff2.mod2)
+
+```
+
+- Based on this test, we would accept the null hypothesis that the full model is __NOT__ better than the simple, or subset, model. 
+
+# Automatic Variable Selection
+
+```{r}
+#Full Model is runoff2.mod1
+
+runoff2.mod0 = lm(RUNOFF ~ 1, data = runoff2) #Null/initial model using one variable. This will be used to stepwise through possible combinations to test which combination of variables fits the best.
+
+step(runoff2.mod0, scope = formula(runoff2.mod1))
+
+```
+
+- The final, lowest, AIC is 768.63. From step 1 to step 2 the AIC drops approximately 90. On subsequent steps the drop is less drastic at about 8. 
+- The selected model is pretty close to the reduced model we used earlier. It adds OP2 which brings the AIC down about 8 from our reduced model. 
+
+# Extending the basic model
+
+```{r}
+
+kidiq = read.csv("../datafiles/kidiq.csv")
+str(kidiq)
+
+```
+
+```{r}
+summary(kidiq)
+
+```
+
+```{r}
+kidiq.lm1 = lm(kid.score ~ mom.hs, data = kidiq) #simple linear model of the kid's IQ score as a function of her/his mother's attendance to high school. R automatically treats binary values, 0/1, as a dummy variable
+
+summary(kidiq.lm1)
+```
+
+- The average child's IQ for a mother who finished high school is approximately 89.32.
+
+## Converting integer variable to a category to use as a dummy variable
+
+```{r}
+kidiq$mom.work2 = factor(kidiq$mom.work, 
+                         labels = c("Tinker", "Tailor", "Soldier", "Spy")) #Added a column to identify labels. Could you use as.factor to convert the 1-4 values into labels? Just want to ensure I understand this correctly.
+
+kidiq.lm2 = lm(kid.score ~ mom.work2, data = kidiq)
+
+summary(kidiq.lm2)
+
+```
+
+-The average IQ of a spy's child is approximately 87.21. 
+
+# Centering and Scaling
+
+```{r}
+kidiq$mom.iq2 = (kidiq$mom.iq - mean(kidiq$mom.iq)) / 10 #dividing by ten scales the new column
+
+kidiq.lm3 = lm(kid.score ~ mom.iq2, data = kidiq)
+
+summary(kidiq.lm3)
+
+```
+
+- The slope for this model is approximately 6. This means for every change in the mother's IQ by 10, the child's IQ will change by 6.  
+- The intercept for this model is approximately 87 which means for a mother with an average IQ, the child's IQ is approximately 87. 
+
+# Adding another variable 
+## Child's IQ as a function of the mother's IQ and high school completion
+
+```{r}
+
+kidiq.lm4 = lm(kid.score ~ mom.iq2 + mom.hs, data = kidiq )
+
+summary(kidiq.lm4)
+
+```
+
+# Model for mothers who did finish high school
+
+```{r}
+
+kidiq.lm.momHS = lm(kid.score ~ mom.hs, data = kidiq)
+
+summary(kidiq.lm.momHS)
+
+```
+
+# Interactions
+
+```{r}
+
+kidiq.lm5 <- lm(kid.score ~ mom.hs * mom.iq2, data = kidiq)
+
+summary(kidiq.lm5)
+
+
+```
+
+## Plotting the model
+
+```{r}
+
+plot(kid.score ~ mom.iq2,
+     data = kidiq,
+     col = (kidiq$mom.hs+1),
+     pch = 16)
+
+abline(coef(kidiq.lm5)[1], coef(kidiq.lm5)[3], lwd = 2) #Line for mom's who did NOT finish
+
+abline(coef(kidiq.lm5)[1] + coef(kidiq.lm5)[2], 
+       coef(kidiq.lm5)[3] + coef(kidiq.lm5)[4], col = 2, lwd = 2) #Line for those that did finish HS
+
+``` 
+
+# __EXERCISES__
+
+## 1. State Dataset Model
+
+```{r}
+statedata = read.csv("../datafiles/statedata.csv")
+str(statedata) #Examining the data frame
+
+statedata.2 = statedata[ , -1] #Dropping the state column from the frame
+str(statedata.2) 
+```
+
+### 1.1 Constructing the models
+
+```{r}
+##Full Model
+state.fullmod = lm(Life.Exp ~ ., data = statedata.2) 
+summary(state.fullmod)
+
+##Null Model (Intercept Only)
+state.nullmod0 = lm(Life.Exp ~ 1, data = statedata.2)
+summary(state.nullmod0)
+```
+
+### 1.2 Stepwise Model Selection
+```{r}
+step(state.nullmod0, scope = formula(state.fullmod))
+
+
+```
+
+### 1.3 Final Model Descriptions and AIC
+- The final model is life expectancy as a function of murder, high school graduation, frost, and population __(Life.Exp ~ Murder + HS.Grad + Frost + Population)__. The AIC score is __-28.16__ which is the lowest of the model outputs from the stepwise regression. 
+
+### 1.4a Model Summary
+```{r}
+
+state.finalmod = lm(Life.Exp ~ Murder + HS.Grad + Frost + Population, data = statedata.2)
+summary(state.finalmod)
+
+```
+
+### 1.4b Model Summary Description
+- The _F_-statistic is large at, __31.37__,  and the _p_-value is extremely small, __1.696e-12__, which is less than our critical threshold of 0.05. The adjusted-$r^{2}$ statistic is __0.7126__ which means approximately 71% of the variance in the data can be explained by the model. Given each of these metrics it appears that our final model fits well. 
+
+### 1.5a Prediction of Life Expectancy in Utah for 2009. 
+
+```{r}
+
+#Creating a new data frame for Utah with:
+#Population - 2,785,000 
+#HS Graduation - 75%
+#Murder Rate - 1.3 per 100,000
+
+new.utah = statedata.2[44, ] #isolate the Utah row from the statedata.2 frame
+new.utah[1] = 2785 #change to population
+new.utah[5:6] = c(1.3, 75) #change to murder rate and high school graduation
+
+utah.pred = predict(state.finalmod, int = "prediction", level = 0.95, newdata = new.utah) #Utah prediction with a 95% confidence interval using the new.utah data frame
+
+utah.pred
+
+
+```
+
+### 1.5b Prediction of Life Expectancy in Utah for 2009 Description
+- Based on our final model, it predicts that the life expectancy for people in Utah is approximately __73.5__ with the lower portion of the prediction interval being 71.9 and the upper portion being 75.0.
+
+### 1.6a Prediction of Life Expectancy in California for 2009
+
+```{r}
+#Creating a new data frame for California with:
+#Population - 36,962,000 
+#HS Graduation - 68.3%
+#Murder Rate - 5.3 per 100,000
+
+new.cali = statedata.2[5, ] #isolate the California row from the statedata.2 frame
+new.cali[1] = 36962 #change to population
+new.cali[5:6] = c(5.3, 68.3) #change to murder rate and high school graduation
+
+cali.pred = predict(state.finalmod, int = "prediction", level = 0.95, newdata = new.cali) #California prediction with a 95% prediction interval with the new values
+
+cali.pred
+```
+### 1.6b Prediction of Life Expectancy in California for 2009
+- Based on our final model, it predicts that the life expectancy for people in California is approximately __74.4__ with the lower portion of the prediction interval being 72.1 and the upper portion being 76.6.
+
+
+
+## 2. Body Temperature Model
+
+```{r}
+##Reading in and adjusting the data
+
+normtemp = read.csv("../datafiles/normtemp.csv")
+normtemp$sex = factor(normtemp$sex, labels = c("Male", "Female")) #change 1 and 2 to male and female
+
+
+```
+
+### 2.1 Pearson's Correlation Test
+
+```{r}
+
+cor.test(normtemp$weight, normtemp$temp) #Follows x, y format
+
+```
+
+```{r}
+##To visualize the data
+
+plot(normtemp$weight, normtemp$temp,
+     col = normtemp$sex,
+     pch = 16,
+     xlab = "Weight",
+     ylab = "Temperature",
+     main = "Temperature/Weight Plot")
+
+```
+
+### 2.2 Building a Model for Temperature as a Function of Weight and Sex
+
+```{r}
+
+temp.lm.full = lm(temp ~ weight + sex, data = normtemp)
+summary(temp.lm.full)
+```
+
+### 2.3 Goodness-of-Fit for the Model
+- The _F_-statistic is not very large at __6.919__, however, the _p_-value is statistically significant at __0.001406__. The $r^{2}$ is approximately 0.08 which indicates that only 8% of the variance in the data is explained by our model. Despite the statistically significant _p_-value, I would hesitate to call this model a good fit.
+
+### 2.4 Coefficient Interpretation
+- The first coefficient is approximately __96.25__ and is the intercept. This means for a male of with a weight of zero, their body temperature is 96.25 degrees. This isn't really useful in explaining our model as we know with someone of a weight of zero does not exist and therefore will not have a weight and temperature.
+- The second coefficient is approximately __0.025__ and it is the slope for a weight increase with all other variables fixed. Therefore for a weight increase of one we expect temperature to rise by 0.025. 
+- The third coefficient is approximately __0.269__ and is the expected increase in temperature for a female, relative to males. This is a dummy offset as there is no interaction in the model. 
+
+```{r}
+##Help to visualize the temperature data
+library(ggeffects)
+temp.lm.full.effects = ggpredict(temp.lm.full, terms = c("weight", "sex"))
+plot(temp.lm.full.effects)
+
+```
+
+### 2.5a Subset Model versus Full Model ANOVA
+
+```{r}
+
+temp.lm.sub.weight = lm(temp ~ weight, data = normtemp)
+summary(temp.lm.sub.weight)
+anova(temp.lm.full, temp.lm.sub.weight)
+```
+
+### 2.5b Subset Model versus Full Model ANOVA Discussion
+- The _F_-statistic for this comparison is __4.776__ and the _p_-value is __0.031__ which indicates that the full model is slightly better than the subset. Given this _p_-value we reject the null hypothesis that the subset model or simple model is better.  
+
+
+
+
+
+
+
+

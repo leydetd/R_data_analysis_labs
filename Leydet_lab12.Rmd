@@ -1,0 +1,647 @@
+---
+title: "Leydet_lab12"
+author: "David Leydet"
+date: "2022-11-17"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    theme: yeti
+---
+
+
+```{r Initial Setup, message=FALSE}
+
+##Set working directory
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab12")
+
+##Load required libraries
+library(ggplot2)
+library(gstat)
+library(RColorBrewer)
+library(sf)
+library(stars)
+library(viridis)
+
+
+```
+
+# **Reading the Data**
+
+```{r Reading the Data}
+
+swiss <- read.csv("../datafiles/swiss_ppt/swiss_ppt.csv")
+head(swiss)
+
+
+```
+
+## **Swiss Precipitation**
+
+```{r Set as Simple Feature}
+
+##Set as simple feature. Use EPSG code 2056 for a Lambert projection coordinate reference system.
+
+swiss.sf <- st_as_sf(swiss, 
+                     coords = c("x", "y"),
+                     crs = 2056)
+
+##Load the DEM for Switzerland as a raster object
+
+swiss.dem <- read_stars("../datafiles/swiss_ppt//swiss_dem.asc")
+
+##Set to Lambert projection
+st_crs(swiss.dem) <- 2056
+
+##Visualize
+plot(swiss.dem)
+
+```
+
+```{r Switzerland Shapefile, message=FALSE}
+
+##Load the countries shapefile
+countries <- st_read("../datafiles/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp")
+
+##Extract Switzerland's Border
+swiss.bord <- subset(countries, NAME == "Switzerland")
+
+##Transform to the Lambert Projection
+swiss.bord <- st_transform(swiss.bord, 2056)
+
+
+##Visualize Precipitation
+plot(swiss.sf["ppt"], 
+     reset = FALSE, 
+     pch = 16)
+
+plot(st_geometry(swiss.bord), add = TRUE)
+
+
+```
+
+```{r ggplot Swiss Precip}
+
+ggplot() + 
+  geom_sf(data = swiss.bord) +
+  geom_sf(data = swiss.sf, aes(col = ppt), size = 1.5, alpha = 0.6) +
+  scale_color_gradient(low = "lightblue", high = "darkblue") +
+  theme_bw()
+
+
+```
+
+
+## **Meuse Soil Sample Dataset**
+
+```{r Meuse Data Read}
+
+##Read in Meuse Point Data
+meuse <- st_read("../datafiles/meuse/meuse.shp", quiet = TRUE)
+
+##Read in Mease River Shape
+meuseriv <- st_read("../datafiles/meuse/meuseriv.shp", quiet = TRUE)
+
+
+```
+
+
+# **Variogram Analysis**
+
+```{r Meuse Simple Plot}
+
+##Plot the sf object using the variable zinc. Add the river geometry as well
+plot(meuse["zinc"], 
+     pch = 16, 
+     cex = 1,
+     reset = FALSE)
+
+plot(meuseriv, 
+     add = TRUE, 
+     col = NA)
+
+
+```
+
+```{r Meuse Histogram}
+
+hist(meuse$zinc,
+     xlab = "Zinc")
+
+##Higher concentrations closer to the river.
+##It is skewed left. Log transform the zinc values to make them more normally distributed.
+
+```
+
+
+```{r Meuse Log Transform}
+
+##Log Transform
+meuse$lzinc <- log(meuse$zinc)
+
+hist(meuse$lzinc)
+
+```
+
+```{r Meuse Log SF Plot}
+
+##Visualize
+plot(meuse["lzinc"], 
+     pch = 16, 
+     cex = 1.25, 
+     reset = FALSE)
+
+plot(meuseriv, 
+     add = TRUE, 
+     col = NA)
+
+```
+
+## **Sample Variogram**
+
+From Simon's Lab:
+
+We will now use the variogram() function to build a sample variogram for the log-transformed data. We start here by loading the gstat library, then build the sample variogram. This uses the usual R model syntax, which we will later use to include covariates. Here we simply use the formula lzinc ~ 1, which indicates that we are assuming the mean log zinc value does not vary across our region. Finally we plot the variogram, adding an argument to show the number of pairs of points used to calculate each point:
+
+
+```{r Sample Variogram}
+
+##Build the Variogram
+mzinc.var <- variogram(lzinc ~ 1, data = meuse)
+
+
+##Plot the Variogram. Display the number of pairs by using the syntax plot.numbers = TRUE
+plot(mzinc.var, plot.numbers = TRUE, pch = '+')
+
+
+
+```
+
+
+```{r Sample Variogram 2}
+
+##Build variogram 2
+##Cutoff = the maximum distance over which we will consider pairwise differences between points.
+##Width = the size of each lag (bin width)
+
+mzinc.var2 <- variogram(lzinc ~ 1, 
+                        data = meuse, 
+                        cutoff = 1500, 
+                        width = 100)
+
+##Plot the variogram
+plot(mzinc.var2, plot.numbers = TRUE, pch = '+')
+
+```
+
+
+```{r Swiss Precip Variogram}
+
+##Build the variogram
+ppt.var <- variogram(ppt ~ 1,
+                     swiss.sf,
+                     cutoff = 100000,
+                     width = 8000)
+
+
+##Plot it
+plot(ppt.var, plot.numbers = TRUE)
+
+
+```
+
+
+## **Variogram Modeling**
+
+```{r Variogram Modeling using gstat}
+
+##Look at the set of standard parametric models that can be used:
+
+vgm()
+
+
+
+```
+
+From Simon's Lab:
+
+To fit a model, it is necessary to create a first model by hand, then use the fit.variogram() function, which uses a weighted least squares method to fit this to the sample variogram. The first model requires you to specify:
+
+- **the model form**
+- **the value of the nugget (the intercept with the Y axis)**
+- **the model range (the distance at which the sample variogram becomes flat)**
+- **the sill, the semivariance value (y-axis) of the range**
+
+Here we specify these as separate variables, then use the vgm() function to build the initial model. As in the previous section, we will start by doing this for the Meuse dataset. Some suggested values are given in the code below, but it is worth replotting the original variogram, to see how these values compare to the sample variable.
+
+
+```{r Variogram Model Build}
+
+##Create variables for the nugget, range, and sill
+modNugget <- 0.05
+modRange <- 1100
+modSill <- 0.65
+
+##Build the Model using a circular model approach
+mzinc.vgm1 <- vgm(psill = modSill, 
+                  model = "Cir", 
+                  range = modRange, 
+                  nugget = modNugget)
+
+##Visualize the Model
+plot(mzinc.var, mzinc.vgm1, main = "Meuse zinc variogram")
+
+
+
+```
+
+```{r Fit Variogram OLS Approach}
+
+##The model only fits approximately to the sample variogram, so we can now use an iterative weighted OLS method (fit.variogram()) to fit the model variogram to the sample variogram.
+
+
+mzinc.vgm2 <- fit.variogram(mzinc.var, mzinc.vgm1)
+
+plot(mzinc.var, mzinc.vgm2, main = "Meuse zinc variogram")
+
+
+```
+
+
+```{r Final Fitted Variogram Parameters}
+
+mzinc.vgm2
+
+```
+
+- Nearly 0.6 (partial sill) is explained by the spatial error of the data set. 
+
+- The range or plateau is the distance of the variogram plateau.
+
+
+```{r Spherical Model - Switzerland Precipitation Data}
+
+##Set the values
+modnug = 10
+modrange2 = 75000
+modsill2 = 140
+
+##Build the model
+ppt.vgm1 = vgm(psill = modsill2,
+               model = "Sph",
+               range = modrange2,
+               nugget = modnug)
+
+##Fit the model to the data
+ppt.vgm2 = fit.variogram(ppt.var, ppt.vgm1)
+
+
+##Visualize it
+plot(ppt.var, 
+     ppt.vgm2,
+     main = "Swiss Precipitation Variogram")
+
+```
+
+```{r Swiss Precip Fitted Values}
+
+
+ppt.vgm2
+
+```
+
+
+# **Spatial Prediction**
+
+## **Ordinary Kriging**
+
+Use the krige() function to perform spatial prediction (interpolation) using ordinary kriging as a default. The following inputs are needed:
+
+- A model formula specifying the variable to be predicted. This can be expanded to include covariates.
+
+- The spatial object with the observed values
+
+- A spatial object with the coordinates to be used for prediction
+
+- The fitted variogram model
+
+- An optional parameter that limits the number of points to be used in predicting any given location
+
+
+```{r Ordinary Kriging}
+
+##Kriging 
+ppt.pred.ok = krige(ppt ~ 1,
+                    locations = swiss.sf,
+                    newdata = swiss.dem,
+                    model = ppt.vgm2,
+                    nmax = 40)
+
+
+```
+
+
+```{r Plotting the Results}
+
+names(ppt.pred.ok)
+
+##Predictions are in var1.pred
+##Prediction Errors are in var1.var
+
+```
+
+
+
+```{r Plotting the Results 2}
+##Set a color palette
+
+my.pal = brewer.pal(n = 11, "Blues")
+  
+plot(ppt.pred.ok,
+     main = "Interpolated Values",
+     col = my.pal)
+
+```
+
+```{r Error Plot}
+
+plot(ppt.pred.ok["var1.var"],
+     main = "Interpolated Value Error")
+
+##Errors are typically smaller near known points
+
+```
+
+## **Assessing Model Quality**
+
+From Simon's Lab:
+
+To assess the performance of our kriging model, we use a n-fold cross-validation (also called k-fold). This splits the data into n subsets, then iteratively predicts each subset from the other n−1 sets. The krige.cv() function performs the cross-validation: this takes the same arguments as the krige() function, but we leave out the object with coordinates for new predictions, and specify nfold, the number of subsets to be used. You will see some warnings about the projection. You can safely ignore these.
+
+```{r n-fold cross validation}
+
+ppt.cv.ok = krige.cv(ppt ~ 1,
+                     locations = swiss.sf,
+                     model = ppt.vgm2,
+                     nmax = 40,
+                     nfold = 5)
+
+head(ppt.cv.ok)
+
+```
+
+
+The output of this function is a spatial object with the following variables:
+
+- var1.pred: the cross-validated prediction at the site (when it is in the test set)
+- var1.var: the cross-validated prediction error at the site
+- observed: the observed value at the site
+- residual: the difference between the predicted and observed value
+- z-score: a z-score calculated as the residual divided by the error
+- fold: the ‘fold’ or iteration when the site was in the test set
+
+
+```{r Prediction RMSE}
+
+##RMSEP
+sqrt(mean(ppt.cv.ok$residual^2))
+
+```
+
+
+```{r Prediction r2}
+
+#Prediction r^2
+cor(ppt.cv.ok$observed, ppt.cv.ok$var1.pred)^2
+
+```
+
+Note:
+
+- The first of these (RMSEP) gives the average error that might be expected when making a prediction, the second (R2P) gives the amount of variance in the test dataset predicted by the model.
+
+```{r Mapping Size and Direction of Residuals}
+
+sp::bubble(as_Spatial(ppt.cv.ok)[,"residual"], pch = 16)
+
+##The map shows little pattern, which is good. Any systematic under or over estimation would suggest that there is a trend or other structural component which is not being captured by the model.
+```
+
+```{r Residual Plot}
+
+##Residual Plot
+plot(ppt.cv.ok$var1.pred, ppt.cv.ok$residual, 
+     xlab = 'PPT Predicted Values', 
+     ylab = 'PPT Residuals')
+
+abline(h = 0, lty = 2)
+
+
+```
+
+# **Exercise**
+
+```{r Oregon Data Read}
+
+# Oregon boundaries
+orotl <- st_read("../datafiles/oregon/orotl.shp", quiet = TRUE)
+st_crs(orotl) <- 4326
+
+# Oregon temperatures
+ortann <- st_read("../datafiles/oregon/oregontann.shp", quiet = TRUE)
+st_crs(ortann) <- 4326
+
+# Oregon DEM file
+orgrid <- st_read("../datafiles/oregon/orgrid.shp", quiet = TRUE) 
+st_crs(orgrid) <- 4326
+
+##Rasterize the point data of the orgrid file into a raster format (interpolated)
+orgrid.dem <- st_rasterize(orgrid, dx = 0.1667, dy = 0.1667)
+
+##plot
+plot(orgrid.dem, reset = FALSE)
+
+##Add the temperature data
+plot(ortann["tann"], 
+     add = TRUE, 
+     pch = 16, 
+     cex = 1.5)
+
+```
+
+
+## **1.1 Annual Temperature Sample Variogram**
+
+```{r Sample Temperature Variogram}
+
+##Build the Variogram
+temp.var = variogram(tann ~ 1, data = ortann)
+
+
+##Plot the Variogram. Display the number of pairs by using the syntax plot.numbers = TRUE
+plot(temp.var, plot.numbers = TRUE, pch = '+')
+
+```
+
+```{r Variogram Adjustment}
+
+##Cutoff = distance cutoff
+##Width = binwidth
+
+temp.var2 <- variogram(tann ~ 1, 
+                        data = ortann, 
+                        cutoff = 225, 
+                        width = 20)
+
+##Plot the variogram
+plot(temp.var2, plot.numbers = TRUE, pch = '+')
+
+```
+
+## **1.2 Annual Temperature Variogram Model**
+
+```{r Variogram Model}
+
+##Build the Model using a circular model approach
+temp.vgm1 <- vgm(psill = 4, 
+                  model = "Cir", 
+                  range = 180, 
+                  nugget = 0.25)
+
+##Visualize the Model
+plot(temp.var2, temp.vgm1, main = "Oregon Temperature Variogram")
+
+```
+
+**Note:**
+
+- The following values were selected for this model:
+  + Nugget: **0.25**
+  + Sill: **4**
+  + Range: **180**
+
+
+## **1.3 Annual Temperature Variogram Model Fit**
+
+```{r Temperature Variogram Fit}
+
+##Variogram Fit using sample variogram 2 and the initial model
+temp.vgm2 = fit.variogram(temp.var, temp.vgm1)
+
+##Plot it
+plot(temp.var, temp.vgm2, main = "Final Temperature Variogram")
+
+##Note: The original sample variogram (temp.var) fits a bit better than temp.var2.
+```
+
+## **1.4 Annual Temperature Interpolation (Kriging)**
+
+```{r Temperature Ordinary Kriging}
+
+##Kriging 
+temp.pred.or = krige(tann ~ 1,
+                    locations = ortann,
+                    newdata = orgrid.dem,
+                    model = temp.vgm2,
+                    nmax = 40)
+
+##Visualize
+##Color scheme
+my.pal2 = brewer.pal(n = 9, "YlOrRd")
+
+##Oregon Geometry
+orotl.geom = st_geometry(orotl)
+
+plot(temp.pred.or,
+     main = "Interpolated Oregon Temperature Values",
+     col = my.pal2,
+     reset = FALSE)
+
+plot(orotl.geom,
+     add = TRUE)
+```
+
+```{r Temperature Prediction Error}
+
+##Use var1.var to plot the residuals
+plot(temp.pred.or["var1.var"],
+     main = "Temperature Prediction Error",
+     reset = FALSE)
+plot(orotl.geom,
+     add = TRUE)
+
+```
+
+## **1.5 Cross-validation**
+
+```{r Temperature 5-fold Cross-Validation}
+
+temp.cv.or = krige.cv(tann ~ 1,
+                     locations = ortann,
+                     model = temp.vgm2,
+                     nmax = 40,
+                     nfold = 5)
+
+head(temp.cv.or)
+
+
+```
+
+
+```{r Temperature Prediction RMSE}
+
+##RMSEP
+temp.rmse = sqrt(mean(temp.cv.or$residual^2))
+
+temp.rmse
+```
+
+
+```{r Temperature Prediction r2}
+
+#Prediction r^2
+temp.rsquared = cor(temp.cv.or$observed, temp.cv.or$var1.pred)^2
+
+temp.rsquared
+```
+
+**Note:**
+
+The cross-validation RMSE is **`r temp.rmse`** and the $r^{2}$ is **`r temp.rsquared`**. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

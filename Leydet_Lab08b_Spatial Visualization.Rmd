@@ -1,0 +1,479 @@
+---
+title: "Lab 08b - Spatial Data Visualization"
+author: "David Leydet"
+date: "2022-10-21"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: yeti
+---
+
+Useful websites to reference for these tools:
+
+**Mapview Controls**:
+https://r-spatial.github.io/mapview/articles/mapview_02-advanced.html 
+
+**Mapview Basemaps**:
+https://leaflet-extras.github.io/leaflet-providers/preview/ 
+
+**ggplot mapping**:
+https://r-spatial.github.io/sf/articles/sf5.html
+
+**Producing kable tables**:
+https://cran.r-project.org/web/packages/kableExtra/vignettes/awesome_table_in_html.html#Table_Styles
+
+
+
+# **Setup**
+
+```{r Setup, message = FALSE}
+
+## Load the Packages for this
+
+library(mapview)
+library(raster)
+library(RColorBrewer)
+library(sf)
+library(tmap)
+library(viridis)
+library(ncdf4)
+library(leaflet) ## Basemaps
+
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab08b")
+
+```
+
+
+# **Static Maps with tmap**
+
+```{r Static Maps with tmap}
+
+## tmap works similar to ggplot
+
+##Using NY shapefile as an example
+
+NY8 = st_read("../datafiles/NY_data/NY8_utm18.shp")
+
+
+```
+
+```{r Syracuse}
+
+## Extract the Polygons for Syracuse
+
+syracuse = NY8[NY8$AREANAME == "Syracuse city" , ]
+
+## Simple map using tm_borders()
+
+syracuse.tmap = tm_shape(syracuse) + tm_borders()
+
+syracuse.tmap
+```
+
+```{r Syracuse Fill Options}
+
+syracuse.tmap +
+  tm_fill("POP8")
+
+
+```
+
+```{r Syracuse Fill 2}
+
+syracuse.tmap +
+  tm_fill("POP8", 
+          palette = brewer.pal(5, "GnBu"), 
+          style = "quantile",
+          title = "Population") +
+  tm_layout(legend.title.size = 1,
+          legend.text.size = 0.6,
+          legend.position = c("right","bottom"),
+          legend.bg.alpha = 1) 
+
+
+```
+
+```{r Other Map Elements}
+
+##Adding graticules, north seeking arrow, credits, etc.
+
+syracuse.tmap +
+  tm_fill("POP8", 
+          palette = brewer.pal(5, "Purples"), 
+          style = "quantile",
+          title = "Population") +
+  tm_layout(legend.title.size = 1,
+          legend.text.size = 0.6,
+          legend.position = c("right","bottom"),
+          legend.bg.alpha = 1) +
+  tm_graticules(col = "lightgray") +
+  tm_compass(position = c("left", "bottom")) +
+  tm_credits("By David Leydet", position = c("right", "top"))
+
+
+
+```
+
+
+# **Point Data**
+
+```{r WNA Climate Map, message =FALSE}
+
+## Read in the data
+wna.climate = read.csv("../datafiles/WNAclimate.csv")
+
+## Set as a simple feature --> point to coordinates (Long/Lat), and give it a coordinate reference system (CRS)
+wna.climate = st_as_sf(wna.climate,
+                       coords = c("LONDD", "LATDD"),
+                       crs = 4326)
+
+
+## Bring in the countries polygon shapefile
+
+countries = st_read("../datafiles/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp", quiet = TRUE)
+
+
+## Plot the map on a color scale using January Temperatures (Jan_Tmp)
+
+tm_shape(wna.climate) +
+  tm_symbols(col = "Jan_Tmp")
+
+```
+
+
+```{r Reverse WNA Climate Map, message = FALSE}
+
+##Reverse the color palette using a "-" symbol
+
+##Change the legend title using title.col =
+
+tm_shape(wna.climate) +
+  tm_symbols(col = "Jan_Tmp",
+             alpha = 0.5,
+             palette = "-RdBu",
+             title.col = "January Temperature")
+
+
+```
+
+```{r WNA Map build, message = FALSE}
+
+## Add the natural earth shape file (variable = countries) to display borders
+
+## Ensure you set the bounding box for the WNAclimate data using the bbox = st_bbox syntax
+
+
+tm_shape(countries, bbox = st_bbox(wna.climate)) +
+  tm_borders(col = "gray") +
+  tm_shape(wna.climate) +
+  tm_symbols(col = "Jan_Tmp",
+             alpha = 0.5,
+             palette = "-RdBu",
+             title.col = "January Temperature") +
+  tm_layout(main.title = "W. North America Climate",
+            legend.position = c("left", "bottom"))
+ 
+
+```
+
+
+```{r Maps with Style, message=FALSE}
+
+## Add tm_style() to explore different map styles!
+
+wna_map = 
+  tm_shape(countries, bbox = st_bbox(wna.climate)) +
+  tm_style("cobalt") +
+  tm_borders(col = "gray") +
+  tm_shape(wna.climate) +
+  tm_symbols(col = "Jan_Tmp",
+             alpha = 0.5,
+             palette = "-RdBu",
+             title.col = "January Temperature") +
+  tm_layout(main.title = "W. North America Climate",
+            legend.position = c("left", "bottom"))
+
+wna_map
+```
+
+
+```{r Saving the Map to File, eval=FALSE}
+
+## Save the map using the tmap_save() function
+
+tmap_save(wna_map, "wna_temp_jan.pdf")
+
+
+```
+
+
+# **Facetted Maps**
+
+```{r Using Facets like ggplot}
+
+## Useful for timeseries visualizations!
+
+## Using built in data set metro
+
+data(metro)
+head(metro)
+
+```
+
+
+```{r Data Conversion to Long Format, message=FALSE}
+
+## This is an sf object, with a set of columns with population size for each decade between 1950 and 2030. To plot this as a facetted map, we first need to convert this to long format with one column for area, one for population size and one for year. We’ll do this imply by concatenating the different populations sizes, and repeating the location names and year, then put it all into a temporary data frame:
+
+## Creating a variable for just population
+
+pop = c(metro$pop1950, metro$pop1960, metro$pop1970, metro$pop1980, metro$pop1990, metro$pop2000)
+
+## Repeat the names six times to match the population data
+name = rep(metro$name, 6)
+
+## Repeat the years from 1950 to 2000 for each number of rows in metro
+year = rep(seq(1950, 2000, by = 10), each = nrow(metro))
+
+##Put it into a temporary dataframe
+tmp = data.frame(pop, name, year)
+
+## Merge it with the original simple feature using name
+
+metro_long = merge(metro, tmp, by = "name")
+
+```
+
+
+```{r Mapping the Population Growth over Time}
+
+tm_shape(metro_long) +
+  tm_facets(by = "year") +
+  tm_symbols("pop", 
+             col = "firebrick",
+             title.size = "Population",
+             legend.size.is.portrait = TRUE) +
+  tm_shape(countries) +
+  tm_borders() +
+  tm_layout(main.title = "Metropolitan Center Population")
+  
+
+
+```
+
+
+# **Raster Data**
+
+```{r Mapping Raster Data}
+
+## Reading in the data
+
+air_temp = rotate(raster("../datafiles/air.mon.ltm.nc", varname = "air"))
+
+## z-value gives you the date? 12/30? Basically January?
+air_temp
+
+```
+
+
+```{r Formatting the Data}
+
+## Change the layer name from Monthly.Long.Term.Mean.Air.Temperature.at.sigma.level.0.995 to something simple jan_tmp
+
+names(air_temp) = "jan_tmp"
+
+## Check CRS
+crs(air_temp)
+
+## Apply the CRS to it
+
+proj4string(air_temp) = CRS("+init=epsg:4326")
+
+## Double check to ensure the CRS was applied
+
+crs(air_temp)
+
+```
+
+
+## **Raster Plot**
+
+```{r Raster Plot, message=FALSE, warning=FALSE}
+
+tm_shape(air_temp) +
+  tm_raster(col = "jan_tmp",
+            n = 9,
+            style = "fisher",
+            palette = "-RdBu",
+            title = "January Temperature",
+            legend.hist = TRUE) +
+  tm_shape(countries) +
+  tm_borders() +
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "left")
+
+
+```
+
+
+# **Tips and Tricks**
+
+```{r Tips and Tricks}
+
+## Use tm_tip() for helpful tips!
+
+tmap_tip()
+
+```
+
+
+# **Interactive Maps with mapview**
+
+```{r Interactive Maps}
+
+
+my.pal = brewer.pal(5, "Reds")
+
+## Initial mapview start
+
+mapview(wna.climate,
+        zcol = "Jul_Tmp", ## Color by July Temperature
+        col.regions = brewer.pal(5, "Reds"), ##Use col.regions!!!
+        color = "gray", ## Outline color
+        alpha.regions = 0.2, ## Fill transparency
+        alpha = 0.3) ## Outline Transparency
+
+```
+
+
+```{r Syracuse Plot}
+
+mapview(syracuse,
+        col.regions = "darkseagreen",
+        color = "black")
+
+```
+
+
+```{r Raster Data with mapview, warning=FALSE}
+## Read in the Data
+
+fn = system.file("extdata", "kiliNDVI.tif", package = "mapview" )
+
+## Extract the first layer
+kili_ndvi = raster::stack(fn)[[1]]
+
+mapview(kili_ndvi,
+        col.regions = viridis::viridis)
+
+```
+
+## **Basemaps**
+
+```{r Basemaps}
+
+## Check out leaflet for basemap options - see https://leaflet-extras.github.io/leaflet-providers/preview/ for examples
+
+mapview(syracuse,
+        col.regions = "coral",
+        color = "gray",
+        map.types = "CartoDB.DarkMatter")
+
+```
+
+## **Layers**
+
+```{r Layering, warning=FALSE}
+
+Syracuse.Centers = st_centroid(syracuse)
+
+lyr1 = mapview(syracuse,
+        col.regions = "coral",
+        color = "gray",
+        map.types = "CartoDB.DarkMatter")
+
+
+lyr2 = mapview(Syracuse.Centers,
+               col.regions = "dodgerblue",
+               color = "gray",
+               cex = 3,
+               map.types = "CartoDB.DarkMatter")
+
+lyr1 + lyr2
+
+```
+
+
+## **Aesthetic Mapping**
+
+```{r Aesthetic Mapping, warning=FALSE}
+
+## Use the zcol argument to map attributes
+
+my.pal2 = brewer.pal(n=7, "GnBu")
+
+mapview(syracuse,
+        zcol = "POP8",
+        col.regions = my.pal2,
+        map.types = "CartoDB.Positron")
+
+
+
+```
+
+
+```{r Brewery Map}
+
+## Breweries in Franconia
+fran.brew = mapview::breweries
+
+## Set point size to number of different types of beer served using cex syntax
+mapview(fran.brew,
+        cex = "number.of.types",
+        color = "gray",
+        col.regions = "darkorange4",
+        alpha.region = 0.4,
+        layer.name = "Franconia Breweries - Number of Beers") ##Changes legend title
+
+```
+
+
+## **Inset Map**
+
+```{r}
+
+## Create a function to add the inset
+add.inset = function(x) leaflet::addMiniMap(x@map)
+
+## Create a variable to store the map
+imap = mapview(fran.brew,
+        cex = "number.of.types",
+        color = "gray",
+        col.regions = "goldenrod2",
+        alpha.region = 0.4,
+        layer.name = "Franconia Breweries - Number of Beers")
+
+## Combine the inset function with your map variable
+add.inset(imap)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

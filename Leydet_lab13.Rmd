@@ -1,0 +1,1130 @@
+---
+title: "Leydet_Lab13"
+author: "David Leydet"
+date: "2022-12-01"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    theme: yeti
+---
+
+**Geostatistics II**
+
+
+```{r Initial Setup}
+
+##Set working directory
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab13")
+
+##Load Packages
+library(ggplot2) #data visualization
+library(gstat) #geostatistics
+library(RColorBrewer) #color palette
+library(sf) #simple feature spatial objects
+library(stars) #geostatistics
+library(viridis) #color palette
+
+```
+
+# **Setting projections for gstat**
+Note from Simon's Lab: 
+By default gstat assumes that your data are in a Cartesian projection, unless the Spatial* object containing the data has projection metadata specifying that it is on a spherical (lat/lon) coordinate system. Without this, longitude and latitude coordinates will be treated as Cartesian, and distances will be incorrectly calculated for variogram analysis and kriging.
+
+```{r Setting Projections}
+##Load the Oregon dataset
+oregon = st_read("../datafiles/oregon/oregontann.shp", quiet = TRUE)
+
+##Check the coordinate system (it is N/A)
+st_crs(oregon)
+
+```
+
+```{r Quick Plot of Temperature}
+##Check variable Names
+names(oregon)
+
+##Plot temperature
+plot(oregon["tann"],
+     pch = 16)
+
+```
+
+
+```{r Initial Variogram of Temp}
+##Initial variogram
+or_vgm = variogram(tann ~ 1,
+                   oregon)
+
+##Visualize
+plot(or_vgm)
+
+
+
+```
+
+Note:
+The distance lags are calculated in degrees. To correct this, we can either project the data or simply specify that these data are spherical coordinates. In general, the second of these is a better approach, unless you are working in a very small area, as all projections will distort distances and/or directions over large areas. Here, we set the st_crs to EPSG 4326, which is the WGS84 standard:
+
+
+```{r Set the CRS}
+##Set the CRS to WGS84 (EPSG 4326)
+
+st_crs(oregon) = 4326
+
+##Check
+st_crs(oregon)
+
+```
+
+
+```{r Replot the Variogram}
+##New Variogram with the correct distances (km)
+
+or_vgm2 = variogram(tann ~ 1,
+                    oregon)
+
+
+##Visualize 
+plot(or_vgm2)
+
+
+```
+
+# **Reading the Swiss precipitation data**
+
+```{r Swiss Precip Data Read}
+## Precipitation data
+swiss <- read.csv("../datafiles/swiss_ppt/swiss_ppt.csv")
+
+##Set as simple feature
+swiss.sf <- st_as_sf(swiss, 
+                     coords = c("x", "y"),
+                     crs = 2056)
+
+## Elevation grid
+swiss.dem <- read_stars("../datafiles/swiss_ppt//swiss_dem.asc")
+
+##Set CRS to match swiss.sf (2056 is a projection centered on Switzerland)
+st_crs(swiss.dem) <- 2056
+
+## Swiss border
+countries <- st_read("../datafiles/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp", quiet = TRUE)
+swiss.bord <- subset(countries, NAME == "Switzerland")
+
+##Reproject to 2056
+swiss.bord <- st_transform(swiss.bord, 2056)
+
+
+```
+
+
+```{r Simple Plot of Swiss Precip}
+##Visualize
+
+plot(swiss.sf["ppt"],
+     reset = FALSE,
+     pch = 18)
+
+plot(st_geometry(swiss.bord),
+     add = TRUE)
+
+
+```
+
+```{r Swiss Precip with ggplot}
+
+precip.plot1 = ggplot() +
+  geom_sf(data = swiss.bord) +
+  geom_sf(data = swiss.sf, 
+          aes(col = ppt),
+          size = 2.5,
+          alpha = 0.9) +
+  #scale_color_viridis_c(direction = -1) +
+  scale_colour_gradient(low = "cadetblue2", high = "dodgerblue4") +
+  theme_bw()
+
+precip.plot1
+
+```
+
+```{r Swiss Precip Log Transformation}
+hist(swiss.sf$ppt)
+
+##log transformation
+swiss.sf$lppt = log(swiss.sf$ppt + 1e-1)
+
+##Visualize
+hist(swiss.sf$lppt)
+
+```
+
+## **Meuse Data Read**
+
+```{r Meuse Data Read}
+
+meuse <- st_read("../datafiles/meuse/meuse.shp", quiet = TRUE)
+
+##Set the CRS to 28992 (Netherlands)
+st_crs(meuse) <- 28992
+
+meuse.riv <- st_read("../datafiles/meuse/meuseriv.shp", quiet = TRUE)
+st_crs(meuse.riv) <- 28992
+
+meuse.grid <- st_read("../datafiles/meuse/meusegrid.shp", quiet = TRUE)
+st_crs(meuse.grid) <- 28992
+
+##Turn the grid to a raster - Why?
+meuse.grid <- st_rasterize(meuse.grid["dist"], dx = 40, dy = 40)
+
+
+```
+
+
+# **Kriging with External Drift**
+
+Note from Simon:
+
+Kriging can be extended to include covariates to improve prediction. One of the most flexible methods is kriging with an external drift, where the drift refers to any covariate that has been recorded both at the sampling locations and at the prediction locations.
+
+
+```{r Swiss Precip and Elevation Plot}
+
+##Visualize
+plot(lppt ~ elev, swiss.sf)
+
+##shows a weak negative relationship, with generally higher values at lower elevations:
+
+```
+
+```{r Swiss Precipitation Variogram}
+
+##Create the Variogram using elevation data from the DEM. 
+
+ppt.var = variogram(lppt ~ elev,
+                    swiss.sf)
+
+
+##Visualize
+
+plot(ppt.var,
+     plot.numbers = TRUE)
+
+```
+
+```{r Model fit to Swiss Precip Variogram}
+
+modNugget <- 0.05 #intercept like term
+modRange <- 100000 #distance of the plateua
+modSill <- 0.75 #semivariance at the range
+
+##Create the model by hand
+ppt.vgm1 <- vgm(psill = modSill, 
+                "Sph", #spherical model
+                range = modRange, 
+                nugget = modNugget)
+
+
+##Fit the model using the variogram and the model created by hand
+ppt.vgm2 <- fit.variogram(ppt.var, ppt.vgm1)
+
+
+##Visualizae
+plot(ppt.var, ppt.vgm2, main = "Swiss precip. variogram")
+
+
+```
+
+Note:
+
+We will now use this variogram to interpolate the precipitation data. We use the same function as in the previous lab (krige()), but now specify ‘elev’ as an independent variable in the model formula. This requires that both the spatial points (swiss.sf) and the new locations (swiss.dem) have a variable called `elev’, so let’s check this first:
+
+```{r Variable Name Check}
+##Swiss.sf check
+
+names(swiss.sf)
+
+```
+
+
+```{r Variable Name Check 2}
+##Swiss.dem check
+
+names(swiss.dem)
+
+```
+
+
+```{r Rename Swiss DEM Variable}
+##Rename swiss.dem variable
+
+names(swiss.dem) = "elev"
+
+##Check
+names(swiss.dem)
+
+```
+
+
+```{r Kriging with External Drift}
+
+ppt.pred.ked = krige(lppt ~ elev,
+                     locations = swiss.sf,
+                     newdata = swiss.dem,
+                     model = ppt.vgm2)
+
+
+```
+
+
+```{r Swiss Interpolated Precip Plot}
+
+my.pal = brewer.pal(9, "Blues")
+
+##Plot predicted values
+plot(ppt.pred.ked["var1.pred"],
+     col = my.pal,
+     main = "Swiss Log Precipitation (KED)")
+
+
+```
+
+```{r Precip Re-transformation}
+
+##Transform the log precip values back to mm using exp()
+ppt.pred.ked$ppt = exp(ppt.pred.ked$var1.pred)
+
+
+##Plot predicted values
+plot(ppt.pred.ked["ppt"],
+     col = my.pal,
+     main = "Swiss Precipitation in mm (KED)")
+
+
+```
+
+
+```{r Swiss Precip Model Cross-validation}
+##Cross-validation of our model (how well does it do to predict)
+
+
+ppt.cv.ked = krige.cv(lppt ~ elev,
+                      locations = swiss.sf,
+                      model = ppt.vgm2,
+                      nmax = 40,
+                      nfold = 5)
+
+```
+
+```{r Swiss Precip RMSE}
+##RMSE
+sqrt(mean(ppt.cv.ked$residual^2))
+
+
+```
+
+```{r Swiss Precip R-squared}
+
+cor(ppt.cv.ked$observed, ppt.cv.ked$var1.pred)^2
+
+```
+
+
+# **Regression Kriging**
+
+Note from Simon:
+
+Regression kriging provides a more flexible approach to including covariates than universal kriging or external drift kriging, but requires a little more work. The idea is that rather than trying to incorporate a potentially complicated relationship in the model, this is modeled separately, then the residuals are interpolated using simple kriging. A final estimate at each new location can then be made by adding the predicted value from the original model to the interpolated residual. This opens up the possibility of using any regression technique with the covariate(s) to model the larger, structural trends, and then using simple kriging to model the deviations from this trend.
+
+
+```{r Precip and Elev Linear Model}
+
+##Build the linear model
+fit1 <- lm(lppt ~ elev, swiss.sf)
+
+##Add the residuals to the sf data object as a variable
+swiss.sf$resid <- residuals(fit1)
+
+
+##Turn th residuals into a variogram
+resid.var <- variogram(resid ~ 1, swiss.sf)
+
+##Visualize
+plot(resid.var)
+
+
+
+```
+
+```{r Precip and Elev Variogram Model}
+
+resid.vgm <- vgm(psill = 0.75, 
+                 model = "Cir", 
+                 range = 100000, 
+                 nugget = 0.05)
+
+plot(resid.var, resid.vgm)
+
+
+
+```
+
+```{r Precip and Elev Variograrm Model Fit}
+
+##Fit the model using the variogram and the model created by hand
+resid.vgm2 <- fit.variogram(resid.var, resid.vgm)
+
+##Visualize
+plot(resid.var, resid.vgm2)
+
+```
+
+```{r Simple Kriging for Precip and Elev}
+
+##Note:
+## Note that as these are residuals, the mean is assumed known (=0), so we use simple kriging for the interpolation. The parameter beta is used to set the value of the mean.
+
+resid.sk = krige(resid ~ 1,
+                 locations = swiss.sf,
+                 newdata = swiss.dem,
+                 model = resid.vgm2,
+                 nmax = 40,
+                 beta = 0)
+
+
+
+```
+
+```{r Residual Plot}
+
+##New color palette
+my.pal2 = brewer.pal(9, "PiYG")
+
+##Visualize
+plot(resid.sk["var1.pred"],
+     col = my.pal2,
+     main = "Swiss Precipitation Residuals (RK)")
+
+
+```
+
+
+```{r Final Estimate - Step 1}
+##Store the linear model prediction in the DEM object
+swiss.dem$ppt.lm <- predict(fit1, swiss.dem)
+
+
+```
+
+
+```{r Final Estimate - Step 2}
+##Add interpolated residuals to these values
+swiss.dem$ppt.rk <- swiss.dem$ppt.lm + resid.sk$var1.pred
+
+
+```
+
+
+```{r Final Estimate - Step 3}
+##Visualize
+my.pal3 <- brewer.pal(9, "Blues")
+
+plot(swiss.dem["ppt.rk"], 
+     col = my.pal3, 
+     main = "Swiss precipitation (Regression Kriging)")
+
+
+```
+
+```{r Final Estimate - Step 4}
+##Optional Transformation of Coefficients
+
+##Transform the log precip values back to mm using exp()
+swiss.dem$ppt.rk.transform = exp(swiss.dem$ppt.rk)
+
+##Visualize
+plot(swiss.dem["ppt.rk.transform"], 
+     col = my.pal3, 
+     main = "Swiss precipitation in mm (Regression Kriging)")
+
+
+```
+
+
+# **Indicator Kriging**
+
+Note: Indicator kriging is used to interpolate binary variables as probabilities. It can be used to estimate whether the variable of interest will be over or below a given threshold at a new location, or the probability that a new location will have a binary or categorical variable. In either case, the method consists quite simply of interpolating binary values (0/1) using ordinary kriging. As this uses the same function as before, you can include a trend or external drift if necessary.
+
+## **Thresholds**
+
+```{r Thresholds}
+
+##We’ll first use this method to find all locations in Switzerland with over 40mm of rainfall. Here, we create a new variable in the swiss.sf data frame, which is whether or not the station had > 40mm rainfall, and use spplot() to make a quick figure.
+
+##Create new variable
+swiss.sf$ppt40 <- swiss.sf$ppt > 40
+
+##Visualize
+plot(swiss.sf["ppt40"], 
+     pch = 18, 
+      main = "PPT > 40mm")
+
+
+
+```
+
+
+```{r Sample Variogram Step}
+##Variogram
+ppt40.var <- variogram(ppt40 ~ 1, swiss.sf)
+
+
+##Visualize
+plot(ppt40.var)
+
+```
+
+
+```{r Variogram Model Step}
+
+##Create model
+ppt40.vgm = vgm(psill = 0.035,
+                range = 40000,
+                nugget = 0.01,
+                model = "Sph")
+
+##Visualize
+plot(ppt40.var, ppt40.vgm)
+
+```
+
+```{r Variogram Model Fit Step}
+
+##Fit the model
+ppt40.vgm2 = fit.variogram(ppt40.var, ppt40.vgm)
+
+
+##Visualize
+plot(ppt40.var, ppt40.vgm)
+
+```
+
+```{r Ordinary Kriging Interpolation Step}
+##Ordinary Kriging
+ppt40.ik = krige(ppt40 ~ 1,
+                 locations = swiss.sf,
+                 newdata = swiss.dem,
+                 model = ppt40.vgm2,
+                 nmax = 40)
+
+
+```
+
+
+```{r Plot Predictions Step}
+##Visualize
+
+plot(ppt40.ik["var1.pred"])
+
+
+```
+
+Note:
+Note that these are not true probabilities (some values <0 are obtained). For the purposes of geostatistical interpolation, however, these are considered as close to being probabilities and are often corrected to between 0 and 1, which we’ll do next. Indicator simulation (see below) offers a method to interpolate true probabilities.
+
+
+```{r Convert to True Probabilities}
+##use the which() function to find all pixels with a value below zero and reset this to zero.
+
+ppt40.ik$var1.pred[which(ppt40.ik$var1.pred < 0)] = 0
+
+##Color Palette
+my.pal4 = rev(viridis::magma(10))
+
+plot(ppt40.ik["var1.pred"], 
+     col = my.pal4, 
+     breaks = seq(0, 1, length.out = 11),
+     main = "P(ppt > 40mm)")
+
+```
+
+
+## **Categorical Variables**
+
+```{r Initial Meuse Data Plot}
+##visualize
+plot(meuse["soil"], pch=24, reset = FALSE)
+plot(meuse.riv, add = TRUE, col = NA)
+
+
+```
+
+```{r Soil Variogram}
+##Note that rather than creating a new variable, we use the I() function, which tells R to create a new variable internally in a model, here a binary value where soil class 1 equals 1, and other classes equal zero:
+
+##Variogram using I
+s1.var <- variogram(I(soil == 1) ~ 1, 
+                    meuse, 
+                    cutoff = 2000)
+
+##Variogram Model
+s1.vgm <- vgm(psill = 0.25, 
+              model = "Sph", 
+              range = 900, 
+              nugget = 0.1)
+
+##Fit the Variogram Model
+s1.vgm <- fit.variogram(s1.var, s1.vgm)
+
+##Visualize
+plot(s1.var, s1.vgm, main = "Soil class 1")
+
+
+```
+
+```{r Krige Soil Type 1}
+
+s1.ik = krige(I(soil == 1) ~ 1,
+              locations = meuse,
+              newdata = meuse.grid,
+              model = s1.vgm)
+
+```
+
+
+```{r Soil Type 1 Visualization}
+
+##Color Palette
+my.pal5 = brewer.pal(9, "Greens")
+
+##Visualize
+
+plot(s1.ik["var1.pred"], 
+     col = my.pal5, 
+     main = "Probability of Soil Type 1", 
+     reset = FALSE)
+
+plot(meuse.riv, col = NA, add = TRUE)
+
+```
+
+
+```{r Soil Class 2 Variogram}
+
+s2.var <- variogram(I(soil == 2) ~ 1, meuse, cutoff = 2000)
+
+vgm_model <- vgm(psill = 0.25, model = "Sph", range = 900, nugget = 0.1)
+
+s2.vgm <- fit.variogram(s2.var, model = vgm_model)
+
+plot(s2.var, s2.vgm, main = "Soil class 2")
+
+
+```
+
+```{r Soil Type 2 Kriging}
+
+s2.ik <- krige(I(soil == 2) ~ 1, meuse, meuse.grid, s2.vgm)
+
+```
+
+
+```{r Soil Class 3 Variogram}
+
+s3.var <- variogram(I(soil == 3) ~ 1, 
+                    meuse, 
+                    cutoff = 2000)
+
+s3.vgm <- fit.variogram(s3.var, model = vgm_model)
+
+plot(s3.var, s3.vgm, main = "Soil class 3")
+
+
+```
+
+```{r Soil Type 3 Kriging}
+
+s3.ik <- krige(I(soil == 3) ~ 1, meuse, meuse.grid, s3.vgm)
+
+```
+
+
+Note:
+
+Once you have the probabilities for all three classes, we can use these to estimate the most probable class at each new location. We do this in three steps: 
+
+1. first, combine the individual probability interpolations into a single matrix
+2. find for each row, the column with the highest probability using max.col() and assign the output as a new variable in meuse.grid
+3. plot the results.
+
+```{r Soil Probabilities}
+##Step 1 - combine the probability interpolations into a single matrix
+
+soil.prob <- cbind(c(s1.ik$var1.pred), 
+                   c(s2.ik$var1.pred), 
+                   c(s3.ik$var1.pred))
+
+##Step 2 - For each row find the column with the highest probability and assign it as a new variable
+
+meuse.grid$soil.pred <- max.col(soil.prob)
+
+##Step 3 - Visualize
+my.pal6 = brewer.pal(3, "Dark2")
+
+plot(meuse.grid["soil.pred"], col = my.pal6,
+     reset = FALSE,
+     main = "Predicted Soil Type")
+plot(meuse.riv,
+     add = TRUE, 
+     col = NA)
+```
+
+
+# **Geostatistical Simulation**
+
+Note: 
+
+All geostatistical simulation methods are designed to produce random spatial fields, where the value at each location is produced by random draws from a probability distribution function defined by the observations. In contrast to straightforward generation of random values, spatially random fields produce random values at each location, but while preserving spatial structure. Individual simulations are much less smooth than kriging interpolation, as the values at any two neighboring locations are randomly chosen, but are spatially correlated as described by a variogram.
+
+Geostatistical simulations come in two forms: constrained and unconstrained. In the unconstrained type, the random field is based on a specified mean and variance, and the variogram for spatial structure. The random fields produced have the same statistical and spatial characteristics, but the minima and maxima may occur anywhere in the study area. Constrained simulations also include the location and value of the observed points. This ensures that minima and maxima occur where they are defined by the original points, and the resulting fields have the same pattern as the original data. We will concentrate here on the constrained type of simulation.
+
+## **Gaussian Simulation**
+
+```{r Gaussian Simulation}
+
+##Similar process as kriging. Set up the variogram
+
+modNugget2 <- 0.05
+modRange2 <- 100000
+modSill2 <- 0.75
+
+##Variogram
+ppt.var5 <- variogram(lppt ~ 1, swiss.sf)
+
+##Model
+ppt.vgm5 <- vgm(psill = modSill2, 
+                "Sph", 
+                range = modRange2, 
+                nugget = modNugget2)
+
+##Fitted Model
+ppt.vgm6 <- fit.variogram(ppt.var, ppt.vgm5)
+
+##Visualize
+plot(ppt.var5, ppt.vgm6, main = "Swiss precip. Variogram")
+
+
+
+```
+
+```{r Six Random Simulations}
+
+##To carry out 6 random simulations of the Swiss precipitation data, we use the krige() function again, with the spatial data, output grid, variogram, etc. The new parameter used here is nsim which controls the number of output simulations:
+
+ppt.pred.sgs = krige(lppt ~ 1,
+                     locations = swiss.sf,
+                     newdata = swiss.dem,
+                     model = ppt.vgm6,
+                     nmax = 40,
+                     nsim = 6)
+
+
+```
+
+
+```{r Simulation Visualization}
+
+sim.pal = brewer.pal(9, "Blues")
+
+##Visualize
+plot(ppt.pred.sgs, 
+     col = sim.pal, 
+     main = "Swiss ppt (SGS)")
+
+
+```
+
+Note: 
+
+In general, single simulations are only of interest to examine the degree of variation between observations (as opposed to kriging which provides smoothed interpolations). The power of the simulation approach is in producing a large number of possible realizations of a spatial field. This allows a better assessment of uncertainty at any location, as we can obtain not just the mean estimated value and a confidence interval, but the full probability distribution of interpolated values.
+
+In the next bit of code, we will produce one hundred simulations of precipitation, then extract the predicted values for a single point and make this into a histogram. So first, re-run the krige function with a higher number of simulations:
+
+
+```{r One Hundred Random Simulations}
+
+##Re-running the model with 100 simulations to build a histogram
+
+ppt.pred.sgs2 = krige(lppt ~ 1,
+                     locations = swiss.sf,
+                     newdata = swiss.dem,
+                     model = ppt.vgm6,
+                     nmax = 40,
+                     nsim = 100)
+
+
+```
+
+
+```{r Point Location}
+##Build a new location (point)
+
+newloc <- st_geometry(st_point(c(2650000, 1200000)))
+
+##Ensure it has the same CRS
+st_crs(newloc) <- st_crs(swiss.dem)
+
+##Visualize
+plot(swiss.dem, reset = FALSE, axes = TRUE)
+
+plot(newloc, pch = "x", cex = 3, col = 2, add = TRUE)
+
+
+```
+
+
+```{r Predicted Values Extract}
+##Extract the predicted values for the new point using st_extract()
+
+newloc.ppt <- st_extract(ppt.pred.sgs2, newloc)
+
+##Convert back to mm
+newloc.ppt$ppt <- exp(newloc.ppt$var1)
+
+##Visualize
+hist(newloc.ppt$ppt, 
+     breaks = 20, 
+     col = "salmon", 
+     main = "Precipitation at (2650000, 1200000)", 
+     xlab = "mm")
+
+
+```
+
+
+## **Indicator Simulation**
+
+Note:
+The simulation approach can also be used for indicator interpolation. As in the previous example, we simply reuse the krige() function. In addition to the nsim parameter, we include a parameter indicators=TRUE to perform indicator kriging. In this case, rather than each simulation estimating a probability at each new location, the method estimates a binary value (presence or absence) by drawing from a binomial distribution.
+
+```{r Soil Simulation}
+## To simulate 6 realizations of the distribution of soil class 1:
+
+s1.sis = krige(I(soil == 1) ~ 1,
+               locations = meuse,
+               newdata = meuse.grid,
+               model = s1.vgm,
+               nsim = 6,
+               indicators = TRUE,
+               nmax = 40)
+
+
+```
+
+```{r Soil Simulation Plot}
+
+##Visualize
+plot(s1.sis)
+
+
+
+```
+
+Note:
+If we now run multiple simulations, we can assess uncertainty. In this case, we get 1000 simulations of the presence of soil type 1 at each location. To estimate probability, we then take the sum of all presences (1) and divide by the number of simulations (1000). This is stored in the output, and then can be plotted using spplot().
+
+
+```{r Soil Probability Simulations}
+
+##1000 simulations
+s1.sim = krige(I(soil == 1) ~ 1,
+               locations = meuse,
+               newdata = meuse.grid,
+               model = s1.vgm,
+               nsim = 1000,
+               indicators = TRUE,
+               nmax = 40)
+
+
+```
+
+
+```{r Soil Type 1 Presence Probabilities}
+
+##Ask about this line of code
+s1.prob = st_apply(s1.sim, c(1,2), sum) / 1000
+
+##Visualize
+plot(s1.prob, 
+     main = "Probability of Soil Type 1")
+
+```
+
+
+# **Exercise**
+
+## **Initial Shapefile Setup**
+
+```{r Initial Ozone Data Setup}
+##Read in Ozone
+ozone.sf <- st_read("../datafiles/mwozone/ozone.shp", quiet = TRUE)
+
+##Set CRS to WGS84
+st_crs(ozone.sf) <- 4326
+
+##Read shapefiles containing info on states, lakes, and places
+states <- st_read("../datafiles/ne_50m_admin_1_states_provinces/ne_50m_admin_1_states_provinces_shp.shp", quiet = TRUE)
+lakes <- st_read("../datafiles/ne_50m_lakes/ne_50m_lakes.shp", quiet = TRUE)
+places <- st_read("../datafiles/ne_50m_populated_places/ne_50m_populated_places.shp", quiet = TRUE)
+
+##Visualize all of the shape files
+
+plot(st_geometry(ozone.sf), reset = FALSE)
+plot(st_geometry(lakes), reset = FALSE, add = TRUE, col = "lightblue")
+plot(st_geometry(states), reset = FALSE, add = TRUE)
+plot(ozone.sf["ozone"], add = TRUE, pch = 16, alpha = 0.5)
+
+```
+
+```{r Ozone ggplot}
+
+##Note:
+##State names are part of this data, as the ID variable. A simple (but not necessarily optimal) way to add state name is to compute the centroid of each state polygon as the coordinates where to draw their names. Centroids are computed with the function st_centroid, their coordinates extracted with st_coordinates, both from the package sf, and attached to the state object:
+
+##Extract the coordinates for the centroid of the place names with the places sf object
+places <- cbind(places, st_coordinates(st_centroid(places)))
+
+ggplot() +
+  geom_sf(data = lakes, fill = "lightblue") +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = ozone.sf, aes(col = ozone), size = 2) +
+  scale_color_viridis_c() +
+  geom_label(data = places, aes(X, Y, label = NAME), size = 2.5) +
+  coord_sf(xlim = c(-94, -82), ylim = c(36, 45), expand = FALSE) +
+  theme_bw()
+
+
+```
+
+
+## **1.1 Ozone Map**
+
+```{r Ozone tmap}
+
+library(tmap)
+library(s2)
+
+##Fix the error "shape contains invalid polygons"
+##update sf package to version 1.0-9 to use.
+#st_use_s2(FALSE) 
+
+
+mybbox <- st_bbox(ozone.sf)
+
+##Fix the error "shape contains invalid polygons"
+tmap_options(check.and.fix = TRUE)
+
+##Make the polygons valid
+lakes = st_make_valid(lakes)
+states = st_make_valid(states)
+
+##Plot
+tm_shape(lakes, bbox = mybbox) + 
+  tm_fill("lightblue") + 
+  tm_shape(states) + 
+  tm_borders() +
+  tm_shape(ozone.sf) + 
+  tm_symbols(col = "ozone", 
+             size = 0.5,
+             alpha = 0.6,
+             palette = "viridis", 
+             title.col =  "Ozone (ppb)") +
+  tm_shape(places) + 
+  tm_text("NAME", size = 0.75) +
+  tm_layout(legend.outside = TRUE,
+            main.title = "Ozone Measurements in the Midwest US") +
+  tm_compass(position = c("left", "top")) +
+  tm_credits("By David Leydet", position = c("right", "top")) + 
+  tm_scale_bar(position = c(0.60, 0.001))
+
+
+```
+
+
+## **1.2 Sample Variogram**
+
+```{r Ozone Threshold Greater than 100 ppb}
+
+##Create new variable
+ozone.sf$ppb100 = ozone.sf$ozone > 100
+
+##Visualize
+ggplot() +
+  geom_sf(data = lakes, fill = "lightblue") +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = ozone.sf, aes(col = ppb100), size = 2) +
+  #scale_color_viridis_c() +
+  geom_label(data = places, aes(X, Y, label = NAME), size = 2.5) +
+  coord_sf(xlim = c(-94, -82), ylim = c(36, 45), expand = FALSE) +
+  theme_bw()
+
+
+```
+
+```{r Ozone Sample Variogram}
+##Sample Variogram
+ppb100.var = variogram(ppb100 ~ 1,
+                       data = ozone.sf)
+
+##Visualize
+plot(ppb100.var,
+     plot.numbers = TRUE)
+
+
+
+```
+
+**Interpretation**
+
+- Ozone measurements above 100 ppb are clustered mainly along the western edge of Lake Michigan between Chicago and Milwaukee. This is likely due to the prevalence of nitrous oxides (NOx) and volatile organic compounds (VOC) - two key ingredients for ozone formation - found in industrial areas. Although there other major metropolitan areas in our study area, many are below 100 ppb which could be due to a variety of factors including temperature fluctuations when these data were collected or the timing of the data collection.
+
+- The variogram indicates rapidly increasing dissimilarity over relatively short distances (within 100km), At larger distances (greater than approximately 120km) the semivariance plateaus at a sill of approximately 0.13.
+
+
+## **1.3 Variogram Model Fit**
+
+```{r Ozone VGM}
+
+##Create model
+ppb100.vgm = vgm(psill = 0.10,
+                range = 150,
+                nugget = 0.07,
+                model = "Sph")
+
+##Visualize
+plot(ppb100.var, ppb100.vgm)
+
+
+```
+
+```{r Ozone Fitted VGM}
+
+##Fit the model
+ppb100.vgm2 = fit.variogram(ppb100.var, ppb100.vgm)
+
+
+##Visualize
+plot(ppb100.var, ppb100.vgm2)
+
+
+
+```
+
+**Notes**
+
+- The fitted variogram does fairly well to fit the semivariance of the ozone values above 100 ppb data. There is a large peak at a distance of approximately 125 that does not fit well regardless of the model chosen. 
+
+- The sample variogram was calculated using a spherical, circular, and gaussian model. The spherical model fit best with the following values:
+
+  + **Nugget = 0.07**
+  + **Range = 150**
+  + **Partial Sill = 0.10**
+  + **Sill = 0.17**
+
+
+## **1.4 Predicted Probability Map**
+
+```{r Create Predition Grid - Ozone}
+
+##Create Lat/Long grid
+pred.grid <- st_as_stars(mybbox, 
+                         xlim = c(-94, -82), 
+                         ylim = c(36, 45), 
+                         dx = 0.1, 
+                         dy = 0.1)
+
+st_crs(pred.grid) <- 4326
+
+
+```
+
+```{r Ozone Ordinary Kriging Interpolation Step}
+##Ordinary Kriging
+ppb100.ik = krige(ppb100 ~ 1,
+                 locations = ozone.sf,
+                 newdata = pred.grid,
+                 model = ppb100.vgm2,
+                 nmax = 40)
+
+
+```
+
+
+```{r Ozone Plot Predictions Step}
+##Visualize
+
+plot(ppb100.ik["var1.pred"])
+
+
+```
+
+```{r Convert to True Probabilities - Ozone}
+##use the which() function to find all pixels with a value below zero and reset this to zero.
+
+ppb100.ik$var1.pred[which(ppb100.ik$var1.pred < 0)] = 0
+
+##Color Palette
+my.pal4 = rev(viridis::magma(10))
+
+plot(ppb100.ik["var1.pred"], 
+     col = my.pal4, 
+     breaks = seq(0, 1, length.out = 11),
+     main = "Probability( > 100ppb)",
+     reset = FALSE)
+#plot(st_geometry(lakes), reset = FALSE, add = TRUE, col = "lightblue")
+plot(st_geometry(states), add = TRUE)
+
+```
+
+```{r Ozone Predictive Plot with Lakes}
+
+plot(ppb100.ik["var1.pred"], 
+     col = my.pal4, 
+     breaks = seq(0, 1, length.out = 11),
+     main = "Probability( > 100ppb)",
+     reset = FALSE)
+plot(st_geometry(lakes), reset = FALSE, add = TRUE, col = "lightblue")
+plot(st_geometry(states), add = TRUE)
+
+```
+
+
+## **1.5 Spatial Pattern Interpretation**
+
+- Ozone measurements above 100 ppb are centered largely on Lake Michigan. This is likely due to the prevalence of nitrous oxides (NOx) and volatile organic compounds (VOC) - two key ingredients for ozone formation - in Chicago and Milwaukee. Ozone is likely built up in these areas, then carried by the wind to the east over Lake Michigan and portions of western Michigan.
+
+- Additionally, there are higher probabilities in central Illinois, Ohio, and the northern portion of Kentucky. This may be caused by heavy industrial areas, powerplants, or other sources of NOx and VOCs. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

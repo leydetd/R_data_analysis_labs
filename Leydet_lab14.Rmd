@@ -1,0 +1,701 @@
+---
+title: "Leydet_lab14"
+author: "David Leydet"
+date: "2022-12-02"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    theme: yeti
+---
+
+
+```{r Initial Setup, message=FALSE}
+##Set Working Directory
+
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab14")
+
+library(sf) #simple features
+library(spatstat) #used for point pattern analysis
+
+
+```
+
+Useful Notes:
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
+
+
+# **Point Pattern Data**
+
+Note: rior to all analysis, the locations must be read in and stored in a point pattern object (ppp). These objects contain, at minimum, the locations of the objects and a description of the window delimiting the study area (either as a box or a polygon). To create this for the BEI dataset, we:
+
+(1) read in the data; 
+(2) check the range of coordinates (with the summary() function); 
+(3) create a bounding window using the owin() function; 
+(4) create the ppp object with the X and Y coordinates and the window
+
+```{r Initial Data Read}
+##Read in the csv file
+bei <- read.csv("../datafiles/bei.csv")
+
+##Show the range of coordinates using summary
+summary(bei)
+
+
+```
+
+
+```{r bei bounding window}
+
+##Create bounding window based on the range of coordinates from the previous step
+
+bei.owin = owin(xrange = c(0,1000), yrange = c(0,500))
+
+##Create the point pattern object 
+
+bei.ppp = ppp(bei$x, bei$y, window = bei.owin)
+
+```
+
+
+```{r Initial Visualization}
+
+##Visualize
+##Note the use of cols argument for color
+plot(bei.ppp, pch = 16, cols = "goldenrod")
+
+```
+
+
+```{r bei summary}
+
+##Summary of the ppp object
+summary(bei.ppp)
+
+```
+
+
+# **Quadrat Counts and Tests**
+
+Note: As the distribution of the trees is clearly non-uniform or inhomogenous, we require different methods to assess how this distribution varies over space. The simplest method is to divide the area into quadrats and count the number of trees per quadrat. The parameters nx and ny define the number of quadrats along each coordinate.
+
+```{r}
+##Quadrat count set up 
+bei.qc <- quadratcount(bei.ppp, nx = 6, ny = 3)
+
+##Visualize
+plot(bei.qc)
+
+```
+
+Note: We can test for a significant departure from a uniform or homogenous distribution by using the function quadrat.test(). This compares the observed number against an expected number if the objects were distributed uniformly (number of trees / number of quadrats). The differences are used in a Chi-squared test, with the null hypothesis of homogeneity or equal distribution among the transects.
+
+```{r Quadrat Chi-squared Test}
+
+##Test
+bei.qt <- quadrat.test(bei.ppp, nx = 6, ny = 3)
+
+##View Results
+bei.qt
+
+
+```
+
+
+```{r bei quadrat chi-squared test visualization}
+
+##Visualize the result of the test by quadrat
+
+plot(bei.qt, cex=0.8)
+
+```
+
+Note: 
+- The left top value is the observed number of points. 
+- The right top value is the expected number of points.
+- The value in the center is the normalized?/standardized? difference. 
+- **Beware of the Modifiable Unit Areal Problem!!**
+
+
+## **Using Coviariates to Check for Correlation**
+
+Note: As an alternative to the simple quadrat approach, we can use a covariate to see if there is an association between values of the covariate and the object distribution. Here we use gridded slope values for the study area, contained in the file beislope.csv, read into R as a pixel image object. In order for this to be used, we:
+
+(1) read in the gridded dataset; 
+(2) create a new window for the gridded data (on a 10m grid); 
+(3) create the pixel object using the as.im() function. Note that we define the window size by hand by specifying minimum and maximum x and y coordinates of the region.
+
+```{r bei slope data read}
+
+##Read in the slope data
+bei.slope <- read.csv("../datafiles/beislope.csv", header = FALSE)
+
+##Define the window for the slope
+bei.slope.owin <- owin(xrange = c(-2.5, 1002.5), yrange = c(-2.5, 502.5))
+
+##Create the pixel object
+bei.slope <- as.im(as.matrix(bei.slope), W = bei.slope.owin)
+
+
+##Visualize
+plot(bei.slope, reset = FALSE)
+
+plot(bei.ppp, pch = 16, cex = 0.7, add = TRUE)
+
+
+```
+
+
+Note: To use the quadrat method with this data, we need to convert the slope into slope classes, then check for association with each class. We start be creating the classes: 
+
+(1) calculate quartiles of slope values for the class boundaries; 
+(2) use the cut() function to assign slope values to one of the four classes; 
+(3) create a tessellation based on the classes, which will be used to identify which class a object belongs to (using the tess() function): 
+
+```{r bei slope class conversion}
+
+##Break it into quantiles
+b <- quantile(bei.slope, probs = seq(0,1, by = 0.25))
+
+##Assign the values to one of the quantiles
+bei.slope.cut <- cut(bei.slope, breaks = b, labels = 1:4)
+
+##Create a tesseliation (A tessellation is created when a shape is repeated over and over again covering a plane without any gaps or overlaps)
+bei.slope.tess <- tess(image = bei.slope.cut)
+
+
+##Visualize
+plot(bei.slope.tess, valuesAreColours=FALSE)
+
+plot(bei.ppp, add = TRUE, pch = "+")
+
+
+```
+
+Note: Now we can use the quadratcount() function, but use the tessellation, rather than a set number of grid boxes.
+
+```{r bei count by tessellation}
+
+##Count by the tessellation
+qb <- quadratcount(bei.ppp, tess = bei.slope.tess)
+
+##Visualize
+plot(qb, valuesAreColours=FALSE)
+
+```
+
+```{r quadrat test by slope class}
+
+##Chi-squared test by slope class
+bei.qt <- quadrat.test(bei.ppp, tess = bei.slope.tess)
+
+##Output
+bei.qt
+
+
+```
+
+
+```{r quadrat test by slope class visualization}
+
+##Visualize
+plot(bei.qt, cex = 0.8, valuesAreColours = FALSE)
+
+```
+
+
+Note: The low p-value again suggests that we can reject the null hypothesis and state that the trees are not uniformly distributed across the slope classes.
+
+
+# **Kernel Density Functions**
+
+Note:Variations in the intensity of a spatial point process may also be investigated using a kernel density method. This fits two-dimensional Gaussian kernels (or windows) to the point objects, and effectively sums them across the area. Areas with higher densities of objects will therefore have a higher sum. These density functions provide a useful summary of variations in intensity and a good visualization method to examine a dataset for random or non-random distributions.
+
+The densities are calculated using the density() function, which adapts to a ppp object. The most important parameter is sigma, which controls the bandwidth or size of the window fit to each point.
+
+
+```{r initial density plot}
+##Visualize
+##sigma controls the bandwidth size
+
+plot(density(bei.ppp, sigma = 60))
+
+```
+
+
+```{r initial density plot 2}
+##Visualize
+##sigma controls the bandwidth size
+
+plot(density(bei.ppp, sigma = 25))
+
+```
+
+
+Note: The bandwidth can be selected using cross validation. This can be done in a two step process by (1) selecting the bandwidth using bw.diggle, then using this in the density function. Note that this tends to give very conservative estimates of bandwidth:
+
+```{r bandwidth estimate}
+
+##Estimate the bandwidth
+bei.bw <- bw.diggle(bei.ppp)
+
+##Visualize
+plot(density(bei.ppp, sigma = bei.bw))
+
+
+```
+
+
+# **Distance Functions**
+
+Note: Distance functions can be used to investigate the interaction between points in space. Various methods exist, all based on the idea of calculating distances between points and other points, or fixed points in the study region. The most well-known of these is Ripley’s K function, which describes the distribution as the set of all pairwise distances between points.
+
+We will run this using a different point data set, the redwoods data: redwood.shp. Read this into R, and create a point process object. As the data is in a shape file, we will need to use the st_read() function from the sf package. This package also includes a helper function as.ppp() to convert directly to a ppp object.
+
+```{r initial redwoods data read, warning=FALSE}
+
+##Read in the shapefile
+redwood.sf <- st_read("../datafiles/redwood/redwood.shp", quiet = TRUE)
+
+##Convert it to a point pattern
+redwood.ppp <- as.ppp(redwood.sf)
+
+##Check the data
+redwood.ppp
+
+```
+
+Note: The function has created a ppp object, but by default it uses the first column in the sf data frame as a mark, a label on each point. We’ll look at this later in the lab, but for now we want to ignore this by setting it to a NULL value. The other thing we’ll correct is the window size, setting the minimum and maximum limits to 0 and 1 for both the x and y axes.
+
+```{r redwood ppp adjustment}
+
+##Set the marks the null
+marks(redwood.ppp) <- NULL
+
+##adjust the window size
+Window(redwood.ppp) <- owin(x = c(0, 1), y = c(0, 1))
+
+##Visualize
+plot(redwood.ppp)
+
+```
+
+## **Ripley's _K_**
+
+Note: Ripley’s K function is calculated using the Kest() function and similar functions exist for the F and G functions. Once calculated, we can plot out the results, including the observed values of Ripley’s K and a theoretical curve based on an homogenous poisson process with an intensity equal to our point process object.
+
+```{r initial ripleys k}
+
+##Execute the Ripley's K test
+redwood.kest <- Kest(redwood.ppp)
+
+##Visualize
+plot(redwood.kest)
+
+```
+
+Interpretation Note:
+If the point process data is effectively random (i.e. follows a poisson distribution), we would expect the observed line (black) to fall on top of or close to the theoretical line (blue). Above the theoretical line indicates clustering; below indicates a regular or ordered distribution. The green and red line represent K values calculated with different corrections for the border effect.
+
+
+Next Potential Step:
+The redwood data appear to be clustered. To test if these are significantly different from a random distribution, we can run a Monte Carlo series of random simulations of homogenous poisson processes, using the function envelope(). This gives us an envelope of possible values of Ripley’s K, which account for simple stochastic differences in random distributions. If the data are really clustered, we expect the observed Ripley’s K to fall outside this envelope. These random simulations are performed using the envelope() function, which requires:
+
+1. A point process object
+2. The function to be used (here Ripley’s K; Kest)
+3. The number of random simulations to be performed (99)
+
+
+```{r Ripleys K monte carlo}
+
+##Ripleys K monte carlo
+redwood.kest.mc <- envelope(redwood.ppp, 
+                            fun = 'Kest', 
+                            nsim = 99, 
+                            verbose = FALSE)
+
+##Visualize
+plot(redwood.kest.mc, shade = c("hi", "lo"))
+
+```
+
+Note: Note that this uses point-wise estimates of uncertainty, and cannot be used as a post-hoc test. A better approach is to calculate the global uncertainty as the largest deviation between the randomly generated values of K and the theoretical value:
+
+
+```{r Ripleys K global envelope}
+
+##Re-run the monte carlo using the global argument
+redwood.kest.mc <- envelope(redwood.ppp, 
+                            fun = 'Kest', 
+                            nsim = 99, 
+                            verbose = FALSE, 
+                            global = TRUE)
+
+##Visualize
+
+plot(redwood.kest.mc, shade = c("hi", "lo"))
+
+```
+
+
+## **Besag's _L_**
+
+Note: The L-function was proposed by Besag as a way to stabilize the variance of Ripley’s K and improve the interpretation. We can calculate this by simply replacing the function name in the envelope() function, as follows:
+
+```{r Besags L}
+
+redwood.lest.mc <- envelope(redwood.ppp, 
+                            fun = 'Lest', 
+                            nsim = 99, 
+                            verbose = FALSE, 
+                            global = TRUE)
+
+plot(redwood.lest.mc, shade = c("hi", "lo"))
+
+
+```
+
+## **Pair Correlation Function**
+
+Note: The final function we will look at here is the pair correlation function. Instead of using cumulative pairs of distances, this is based on the number of pairs of points seperated by a band of distances. This has the advantage of providing a clearer idea of the range of interactions - as Ripley’s K is based on the cumulative set of distances, this can make it seem as though interactions are present over greater distances than they really are. Again, we can use the envelope() function, but this time we remove the global option by setting it to false, as this is no longer needed.
+
+```{r Pair correlation function}
+
+redwood.pcf.mc <- envelope(redwood.ppp, 
+                           fun = 'pcf', 
+                           nsim = 99, 
+                           verbose = FALSE)
+
+plot(redwood.pcf.mc, shade=c("hi", "lo"), ylim = c(0, 5))
+#legend(x = 0.20, y = 2.5)
+
+```
+
+Interpretation: This shows positive interactions up to a range of about 0.07 map units, much less than in the corresponding K-function.
+
+
+
+# **Marked Point Processes**
+
+Note:
+In the previous sections, the point processes have been considered as single objects. Marked point process data include some information that distinguish the objects into different classes, allowing study of the co-occurrence (either positive or negative) between different classes of object. The Lansing forest data set contains the location of a set of trees in a forest in Michigan. Read this file in and take a look at the structure of the data, and you will see there is a column defining the species name of each tree.
+
+
+```{r Lansing Tree Data Read}
+
+lansing <- read.csv("../datafiles/lansing/lansing.csv")
+
+str(lansing)
+
+
+```
+
+Note:
+We’ll now create a ppp object using the species to defined the marks or the labels of each point. Some differences from before: (1) the window describing the study area is in a shape file (lansing.shp and will need to be read in and converted to an owin object; (2) we need to specify the class information (the species names) when creating the ppp object, using the marks parameter. Note that we first need to convert this column to a factor so that R will recognize it as labels.
+
+```{r Convert Lansing to ppp}
+
+##Convert to factor
+lansing$species <- as.factor(lansing$species)
+
+##set window size
+lansing.win <- st_read("../datafiles/lansing/lansing.shp", quiet = TRUE)
+
+##Set as ppp
+lansing.ppp <- ppp(x = lansing$x, 
+                   y = lansing$y, 
+                   win = lansing.win, 
+                   marks = lansing$species)
+
+##visualize
+plot(lansing.ppp)
+
+```
+
+Note: The plot shows all the different marks (species) plotted together. We can access different marks, using the split() function, and can use this to analyze the distribution of any single species:
+
+```{r Lansing Species Split}
+
+##Plot by species
+plot(split(lansing.ppp), main = "All marks")
+
+```
+
+```{r Maple Plot}
+
+##Maple Only Plot
+plot(split(lansing.ppp)$maple, "Maple trees")
+
+```
+
+```{r Density plot by species}
+
+#Plot by species
+plot(density(split(lansing.ppp)), main = "Lansing density surfaces")
+
+
+```
+
+Note:
+To examine the co-occurrence of two marks or species, we can again use Ripley’s K function. We use the cross version: Kcross(), which examines pairwise differences between objects from the two classes. Again, we use the envelope() function to simulate random distributions, and specify the two species (marks) as i and j in the function:
+
+
+```{r Lansing Ripleys K}
+
+##Using Ripley's K to test the cooccurence of black oak and hickory
+lansing.kc <- envelope(lansing.ppp, 
+                       Kcross, 
+                       i = "blackoak", 
+                       j = "hickory",
+                       nsim = 99, 
+                       verbose = FALSE)
+
+##Visualize
+plot(lansing.kc)
+
+```
+
+Note:
+As before, we can plot the output as observed curves and the envelope of simulated random distributions. If the observed curve is above the envelope, this is evidence that the two species co-occur; if below then the two species tend to occur in different areas, suggesting some competitive interaction. If the observed curve is within the envelope, then the combined distribution is random.
+
+
+
+# **Point Process Models**
+
+Note: 
+Point process models can be fit to any ppp object using the ppm() function. This uses the set of observed points to model the variations in intensity of a point process, usually based on some set of covariates. This function takes as its first argument, a ppp object, and a set of covariates as the second argument. Note that the second argument is the same syntax as the right hand side of a linear model in R. We start by building a simple model of a homogeneous Poisson process (i.e. with no covariates):
+
+
+```{r Simple Model Build - bei}
+
+##model build 
+##Poisson process/distribution (counts/intensity per unit area)
+fit0 <- ppm(bei.ppp ~ 1)
+
+
+##output
+fit0
+
+
+```
+
+```{r Convert from log scale}
+
+##Convert back to the original scale
+exp(coef(fit0))
+
+
+```
+
+Interpretation:
+Telling us there is about 0.007th of a tree in each square meter. To check this is right, let’s get the intensity directly from the bei.ppp object:
+
+```{r Summary Check}
+
+##Check the intensity against the summary of the original ppp object
+summary(bei.ppp)
+
+```
+
+
+Note:
+The following example models intensity as a second order polynomial function of the x and y coordinates of the objects. The polynom() function expands a set of variables into their second (or nth) order form (i.e. x+y+x2+y2+x∗y for second order coordinates).
+
+
+```{r Second order polynomial model}
+
+##Build the model
+fit1 <- ppm(bei.ppp ~ polynom(x, y, 2))
+
+##View the model
+fit1
+
+
+
+```
+
+
+
+```{r bei Trend Surface}
+
+##Visualize
+plot(fit1, 
+     how = 'image', 
+     se = FALSE, 
+     pause = FALSE)
+
+
+```
+
+Note:
+
+Earlier, we saw a relationship between tree location and slope. We can use the same function (ppm()) to model the intensity of the distribution using slope values. For a point process model, it is important to have values of the covariate at locations away from the points, as well as at the, Here, we use the slope image (bei.slope), specified using the usual R model syntax.
+
+```{r Slope and bei model}
+
+##Build the model
+fit2 <- ppm(bei.ppp ~ bei.slope)
+
+##Output
+fit2
+
+
+```
+
+
+Note:
+The coefficient for the slope is about 5. Remember for regression models based on the log of the response variable, this is a multiplier, and reflects the increase in the intensity with each unit increase in slope. We can again plot the fitted trend surface:
+
+```{r Slope and bei model visualization}
+
+##Visualize
+plot(fit2, 
+     how = 'image', 
+     se = FALSE, 
+     pause = FALSE)
+
+
+```
+
+
+
+# **Exercise**
+
+## **Initial Urkiola Data Read**
+
+```{r Urikiola Initial Data Read}
+
+# Tree locations
+urkiola.sf <- st_read("../datafiles/urkiola/urkiola.shp")
+
+# Park boundary
+urkiola.win <- st_read("../datafiles/urkiola/urkiolaWindow.shp")
+
+## Window
+urkiola.win <- as.owin(urkiola.win)
+
+# First extract coordinates
+urkiola.crds <- st_coordinates(urkiola.sf)
+
+## Convert to ppp, using coordinates from previous step, marks as the tree species, and the window from step two
+urkiola.ppp <- ppp(x = urkiola.crds[, 1], y = urkiola.crds[,2], 
+                   marks = as.factor(urkiola.sf$tree), window = urkiola.win)
+
+##Visualize
+plot(urkiola.ppp)
+
+
+
+```
+
+
+## **1.1 Intensity**
+
+```{r Urkiola Intensity}
+
+##Intensity
+urkiola.sum = summary(urkiola.ppp)
+
+urkiola.sum
+
+```
+
+
+- The intensity for the combined set of two tree species is **`r urkiola.sum$intensity`**
+
+
+## **1.2 Distribution Plot**
+
+```{r Urkiola Split Plot}
+
+##Plot by species
+plot(split(urkiola.ppp), main = " Tree Species")
+
+```
+
+
+## **1.3 Kernel Density Plot**
+
+```{r Urkiola Density Plot by Species}
+
+#Density plot by species
+plot(density(split(urkiola.ppp)), main = " Tree Species")
+
+
+```
+
+Interpretation:
+
+- Based on these density plots it appears that these two species co-occur in the southeastern corner and northern portion of the park. The intensity for oak trees is high in the center of the park compared to a low intensity for birch trees, which indicates they do not co-occur in this area. 
+
+
+## **1.4 Ripley's K**
+
+```{r Urkiola Ripleys K analysis}
+
+##Ripleys K monte carlo
+urkiola.kest.mc <- envelope(urkiola.ppp, 
+                            fun = 'Kest', 
+                            global = TRUE,
+                            nsim = 99, 
+                            verbose = FALSE)
+
+##Visualize
+plot(urkiola.kest.mc)
+ 
+```
+
+
+```{r Urkiola Ripleys K Summary}
+
+##Summary Function to obtain significance level of Ripleys K
+urkiola.kest.sum = summary(urkiola.kest.mc)
+
+urkiola.kest.sum
+
+```
+
+Interpretation:
+- Our Ripley's _K_ plot indicates that the tree species are spatially random at distances less than approximately 20 units. The tree species appear to co-occur at distances larger than 20 units although the observed curve is barely outside of our confidence interval. This curve was calculated using a global envelope, which estimates the confidence interval using the maximum distance between the envelope and the theoretical _k_-function. 
+
+- The significance value of this Monte Carlo test is 0.01, which leads us to accept the results of this test as the probability of this curve being generated by chance is 0.01. 
+
+
+## **1.5 Spatial Dependence Test**
+
+```{r Urkiola Kcross}
+
+##Using Ripley's K to test the cooccurence of birch and oak
+urkiola.kc <- envelope(urkiola.ppp, 
+                       fun = Kcross, 
+                       i = "birch", 
+                       j = "oak",
+                       nsim = 99, 
+                       verbose = FALSE)
+
+##Visualize
+plot(urkiola.kc)
+
+
+```
+
+```{r Urkiola K cross summary}
+
+summary(urkiola.kc)
+
+```
+
+Interpretation:
+- This Ripley's _K_ suggests that these two species are spatially random as most of the observations fall within the confidence interval of our theoretical curve. In other words, these species are not correlated with each other. 
+
+- The significance value of this Monte Carlo test is 0.02, which leads us to accept the results of this test as the probability of this curve being generated by chance is 0.02. 
+
+
+
+ 
+
+

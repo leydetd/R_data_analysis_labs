@@ -1,0 +1,604 @@
+---
+title: "ggplot practice"
+author: "David Leydet"
+date: "2022-09-27"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: yeti
+---
+
+# **Initial ggplot set up**
+
+```{r, message = FALSE }
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab05b")
+
+library(ggplot2)
+library(dplyr) #for helping rename/shape data
+library(ggpubr) #additional package for producing plots
+library(plotly) #interactive figures
+library(ggthemes) #adding additional themes
+
+penguins = read.csv("../datafiles/penguins.csv")
+orange = read.csv("../datafiles/orange.csv")
+gapdata = read.csv("../datafiles/gapminderData5.csv")
+VADeaths = read.csv("../datafiles/VADeaths.csv")
+
+```
+
+```{r}
+str(penguins)
+
+```
+
+```{r}
+str(orange)
+
+```
+
+```{r}
+str(gapdata)
+
+```
+
+```{r}
+str(VADeaths)
+
+```
+
+# **Data Reshaping**
+
+```{r}
+##Reshaping data from wide to long format
+colnames(VADeaths)[1] = "Age" ##Renaming the column header to age
+
+library(tidyr) #package to reshape data
+
+
+##First, names_to specifies the names of new columns for demographic class data. Second, names_sep specifies the character for separating the column names as values into the respective columns; in this case, the period (‘.’), which is a reserved expression and thus needs to be escaped with two back ticks (‘\’). Finally, values_to specifies the name of the new column for death rate data.
+
+VADeaths2 = pivot_longer(data = VADeaths,
+                          cols = Rural.Male:Urban.Female,
+                          names_to = c("Residence", "Gender"),
+                          names_sep = "\\.",
+                          values_to = "DeathRate")
+
+
+VADeaths2
+```
+
+# **qplots()**
+These are quick plots with similar syntax to base r.
+
+## **Scatterplots**
+
+```{r}
+qplot(bill_depth_mm, bill_length_mm, data = penguins)
+
+
+```
+
+```{r}
+qplot(bill_depth_mm, bill_length_mm, 
+      data = penguins,
+      col = species, ##color by species
+      size = body_mass_g, ##symbol size by body mass
+      alpha = I(0.7), ##make the symbols slightly transparent to see overlap
+      xlab = "Bill Depth (mm)",
+      ylab = "Bill Length (mm)",
+      main = "Penguin Bill Measurements")
+
+
+```
+
+## **Histograms and Boxplots**
+
+```{r}
+
+qplot(bill_length_mm,
+      data = penguins,
+      fill = 'coral2',
+      binwidth = 1,
+      geom = 'histogram')
+
+```
+
+```{r}
+
+qplot(species, bill_depth_mm,
+      data = penguins,
+      geom = 'boxplot',
+      col = species,
+      main = "Bill Depth (mm) by Species",
+      xlab = "Species",
+      ylab = "Bill Depth (mm)")
+
+
+```
+
+## **Line Plots**
+
+```{r}
+
+qplot(age, circumference,
+      data = orange,
+      geom = 'line')
+
+```
+
+```{r}
+#Reshaping the orange data set to make the lines factors instead of continuous data. This will break it up in to separate lines
+
+orange$Tree = factor(orange$Tree)
+orange$Tree
+
+qplot(age, circumference,
+      data = orange,
+      geom = 'line',
+      col = Tree,
+      main = "Orange Tree Circumference by Age",
+      ylab = "Circumference (cm)",
+      xlab = "Age (years)")
+
+```
+
+# **Advanced Figures with ggplot()**
+
+From Simon's Notes:
+
+The ggplot() function offers more control over your plots. It works in quite a different way to the other plotting functions, that start with a base plot, then add other points, lines, etc to the figure. Instead, ggplot creates a plot object, which can be adjusted and added to as you proceed.
+
+In order to understand how ggplot makes a figure, we need to establish what the fundamental parts are of every data graph. They are:
+
+1. Aesthetics – these are the roles that the variables play in each graph. A variable may control where points appear, the color or shape of a point, the height of a bar and so on.
+
+2. Geometries – these are the geometric objects which represent the data: points, lines, bars, …
+
+3. Statistics – these are the functions which add some interpretation to the data, e.g. best fit line, location of median, etc
+
+4. Scales – these are legends that show the relationship between variables and different symbols or colors (e.g. circular symbols represent females while squares represent males)
+
+5. Facets – these are groups in your data which may be used to make multiple graphs, each for one of the groups. For example, faceting by gender would cause the graph to repeat for the two genders.
+
+```{r}
+
+penguin.plot = ggplot(data = penguins,aes(x = bill_depth_mm, y = bill_length_mm))
+penguin.plot ##The initial plot is just that, a plot. We need to tell it geometry
+
+```
+
+```{r}
+
+penguin.plot + geom_point() ## telling the plot to use point geometry. If we just type penguin.plot, it will just draw the first figure with no points.
+
+```
+
+```{r}
+#Alternate setup?
+
+penguin.plot2 = ggplot( data = penguins, aes(x = bill_depth_mm, y = bill_length_mm, color = species)) + ##Initial Plot set up; color by species
+  geom_point() + ##Point Geometry
+  labs(title = "Penguin Bill Measurments by Species",
+       subtitle = "By Dave Leydet",
+       caption = "GEOG6000 Demonstration - University of Utah") + ##Title/Subtitle Labels
+  xlab("Bill Depth (mm)") +
+  ylab("Bill Length (mm)") ##x and y labels
+  
+
+  
+  
+penguin.plot2
+
+```
+
+## **Histograms**
+
+```{r}
+
+life.exp.plot = ggplot( data = gapdata, aes(x = lifeExp, fill = continent), position = 'identity') + ##Fill - use color to fill by continent. Position by stacking bars starting at zero (0)
+  geom_histogram(binwidth = 1) + ##histogram with a bin width of 1
+  labs(title = "Life Expectancy Histogram",
+       subtitle = "By Dave Leydet") +
+  xlab("Life Expectancy")
+
+life.exp.plot
+
+```
+
+## **Facet (Splitting Figures by Variables)**
+
+```{r}
+
+life.exp.plot2 = ggplot( data = gapdata, aes(x = lifeExp)) + ##color is for the outline
+  geom_histogram(binwidth = 2, color = 'lightblue', fill = 'white') + ##histogram with a bin width of 1. Put the color here so it doesnt show as a label
+  labs(title = "Life Expectancy Histogram",
+       subtitle = "By Dave Leydet") +
+  xlab("Life Expectancy") +
+  facet_wrap(~continent) ##Need to use a tilda (~) here to identify the variable
+
+life.exp.plot2
+
+```
+
+
+```{r fig.width = 7, fig.height = 10}
+##Use ```{r fig.width = 7, fig.height = 10} to adjust the size of the figure once is knit'd to html. Reminder - this is in the chunk header.
+
+
+life.exp.plot3 = ggplot( data = gapdata, aes(x = lifeExp)) + ##color is for the outline
+  geom_histogram(binwidth = 2, color = 'darkgoldenrod1', fill = 'darkgoldenrod1') + ##histogram with a bin width of 1. Put the color here so it doesnt show as a label
+  labs(title = "Life Expectancy Histogram",
+       subtitle = "By Dave Leydet") +
+  xlab("Life Expectancy") +
+  facet_wrap(year ~ continent) ##split by year and 
+
+life.exp.plot3
+
+
+
+```
+
+## **Density Plots**
+
+```{r}
+
+life.exp.plot4 = ggplot( data = gapdata, aes(x = lifeExp)) + 
+  labs(title = "GapMinder Life Expectancy",
+       subtitle = "By Dave Leydet") +
+  xlab("Life Expectancy") 
+
+life.exp.plot4
+
+```
+
+```{r}
+
+life.exp.plot4 + 
+  geom_density(aes(fill = continent), alpha = 0.4) +
+  ylab("Density")
+
+```
+
+
+## **Boxplots**
+
+```{r}
+
+lcplot = ggplot( data = gapdata, aes(x = continent, y = lifeExp))
+lcplot + geom_boxplot(aes(fill = continent))
+
+```
+
+## **Barcharts**
+
+```{r}
+lcplot2 = ggplot(gapdata, aes(x = continent, fill = continent))
+
+lcplot2 + geom_bar()
+
+```
+
+```{r}
+
+#geom_bar(stat = 'identity') overrides the default behavior of r to create a bar graph based on the count of x observations instead of just y values. geom_col() accomplishes the same thing by default. 
+
+dr.plot = ggplot(data = VADeaths2, aes(x = Age, y = DeathRate)) +
+  geom_bar(stat = 'identity') +
+  xlab("Age") +
+  ylab("Death Rate") +
+  labs(title = "Death Rate by Age Group")
+
+
+dr.plot2 = ggplot(data = VADeaths2, aes(x = Age, y = DeathRate, fill = Residence)) +
+  geom_bar(stat = 'identity') +
+  xlab("Age") +
+  ylab("Death Rate") +
+  labs(title = "Death Rate by Age Group")
+
+##Use ggarange from the ggpubr package to arrange the plots in an array
+plot.comb = ggarrange(dr.plot, dr.plot2,
+                     ncol = 2,
+                     nrow = 1)
+
+plot.comb
+
+
+```
+
+```{r}
+
+#Split out the residence to be side by side using position = 'dodge'
+
+dr.plot3 = ggplot(data = VADeaths2, aes(x = Age, y = DeathRate, fill = Residence)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  xlab("Age") +
+  ylab("Death Rate") +
+  labs(title = "Death Rate by Age Group")
+
+dr.plot3
+
+```
+```{r}
+
+##Adding a facet wrap to break out the charts by gender ( ~ Gender syntax) and flipping the x and y axes (coord_flip syntax)
+
+dr.plot4 = ggplot(data = VADeaths2, aes(x = Age, y = DeathRate, fill = Residence)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  xlab("Age") +
+  ylab("Death Rate") +
+  labs(title = "Death Rate by Age Group") +
+  facet_wrap( ~ Gender) +
+  coord_flip()
+
+dr.plot4
+
+
+```
+
+## **Scatterplots**
+
+```{r}
+
+#Basic scatter plot setup.
+#Using the variable "+" syntax to build/change/modify the plot. Can be used for all plots.
+
+scttr.plot1 = ggplot(data = gapdata, aes(x = gdpPercap, y = lifeExp))
+
+scttr.plot1 + geom_point() 
+```
+
+```{r}
+
+##Log transformation options
+
+## Direct option
+
+scttr.plot2 = ggplot(data = gapdata, aes(x = log10(gdpPercap), y = lifeExp)) +
+  geom_point() + 
+  labs(title = "Direct Transformation")
+
+##Keeps the original values on the axis labels.
+scttr.plot3 = scttr.plot1 +
+  geom_point() + 
+  scale_x_log10() +
+  labs(title = "Scale_x_transformation")
+
+##Create side by side ggplots
+ggarrange(scttr.plot2, scttr.plot3,
+         ncol = 2,
+         nrow = 1)
+
+```
+
+```{r}
+
+##Add a trend line with geom_smooth() argument fitted using a spline or local regression (loess).
+
+##Help with the theme and color by Abby
+
+scttr.plot1 + geom_point(color = "white") + scale_x_log10() + geom_smooth(color = "purple") + theme_dark() + labs(title = "By Abby and David Leydet")
+
+```
+
+
+```{r}
+
+scttr.plot1 + 
+  geom_point(aes(color = continent)) +
+  scale_x_log10() +
+  theme_bw()
+
+```
+
+```{r}
+
+##Adding just a single linear model line through the data
+
+scttr.plot1 + 
+  geom_point(aes(color = continent)) +
+  scale_x_log10() +
+  theme_bw() +
+  geom_smooth(method = 'lm', color = "black")
+
+```
+
+```{r}
+
+##Create another scatter plot with the main object colored by continent and scaled. Then putting the smoothing lines through each group of countries by continent. 
+
+scttr.plot4 = ggplot(data = gapdata, aes(x = gdpPercap, y = lifeExp, color = continent)) + scale_x_log10()
+
+scttr.plot4 + 
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_bw()
+
+```
+
+```{r}
+
+#Subtract out geom_point() to just observe the trend lines
+
+scttr.plot4 +
+  geom_smooth(method = 'lm') +
+  theme_bw()
+
+```
+
+```{r}
+#facet wraps
+
+scttr.plot4 +
+  geom_point() +
+  facet_wrap(~continent) +
+  theme_cleveland()
+
+
+```
+
+
+```{r}
+
+##add trendlines to each facet
+
+scttr.plot4 +
+  geom_point() +
+  facet_wrap(~continent) +
+  theme_cleveland() +
+  geom_smooth(method = 'lm', color = "black") ##need to color the trendlines black to see them
+  
+  
+
+```
+
+
+```{r fig.width = 10, fig.length = 10, messages = FALSE, warning=FALSE}
+
+##Removing warnings by including ```{r warning=FALSE}
+##facet wrap by year and continent
+
+scttr.plot4 +
+  geom_point() +
+  facet_grid(year ~ continent) +
+  theme_cleveland() +
+  geom_smooth(method = 'lm', color = "black")
+
+```
+
+## **Line Plots**
+
+```{r}
+
+line.plot1 = ggplot(data = gapdata, aes(x = year, y = lifeExp))
+
+line.plot1 + geom_line(aes(group = country, color = continent)) +
+  facet_wrap(~continent) +
+  theme_bw()
+
+
+```
+
+
+```{r}
+##Plotly version of the previous figure
+##  geom_line(aes(group = country, color = continent) shows the data by country and allows the hover to display the data for each strand
+
+line.plot2 = ggplot(data = gapdata, aes(x = year, y = lifeExp)) + 
+  geom_line(aes(group = country, color = continent)) +
+  facet_wrap(~continent) +
+  theme_bw()
+
+ggplotly(line.plot2) ##convert a ggplot to plotly
+
+```
+## **Subsetting Data for Lines**
+
+```{r}
+## United States Subset
+
+usa = subset(gapdata, country == "United States")
+
+usa.plot = ggplot(data = usa, aes(x = year, y = lifeExp)) +
+  geom_line(color = "blue") +
+  geom_point() +
+  theme_light()
+
+ggplotly(usa.plot)
+
+
+```
+
+```{r}
+
+slct.countries = c("Canada", "Rwanda", "Cambodia", "Mexico", "United States")
+
+slct.country.plot = ggplot(subset(gapdata, country %in% slct.countries), aes(x = year, y = lifeExp, color = country)) +
+  geom_line() +
+  geom_point() +
+  theme_bw() +
+  labs(title = "Life Expectancy by Country") +
+  xlab("Year") +
+  ylab("Life Expectancy")
+
+ggplotly(slct.country.plot)
+
+```
+# **Saving Figures**
+
+```{r}
+
+scttr.plot5 = ggplot(data = gapdata, aes(x = gdpPercap, y = lifeExp, color = continent)) + 
+  scale_x_log10() +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_bw() +
+  labs(title = "Life Expectancy by Country GDP") +
+  xlab("GDP (log scaled)") +
+  ylab("Life Expectancy") +
+  guides(color = guide_legend(title = "Continent"))
+
+scttr.plot5
+
+```
+
+```{r}
+##Saving it
+
+##adjusting the size with height and width arguments
+ggsave("lifeExp_plot.jpg", scttr.plot5,
+       width = 7,
+       height = 7)
+
+
+#save as a .pdf
+ggsave("lifeExp_plot.pdf", scttr.plot5)
+
+```
+
+# **Themes**
+
+```{r}
+
+scttr.plot1 +
+  geom_point() +
+  scale_x_log10() +
+  theme_gdocs()
+
+```
+
+```{r}
+
+scttr.plot1 +
+  geom_point() +
+  scale_x_log10() +
+  theme_fivethirtyeight()
+
+```
+
+
+Please check out the ggplot cheatsheets from RStudio!
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

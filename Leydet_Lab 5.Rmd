@@ -1,0 +1,437 @@
+---
+title: "Leydet - GEOG6000 Lab 5 - Modeling III"
+author: "David Leydet"
+date: "2022-09-21"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: united
+---
+
+# Generalized Linear Models
+
+```{r}
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab05")
+
+```
+
+## Binomial Model 1
+
+**Used for binary (0, 1) data.**
+
+```{r}
+
+irished = read.csv("../datafiles/irished.csv", header = TRUE)
+
+##Change the numerical values to categorical data with labels
+
+irished$sex = factor(irished$sex,
+                     levels = c(1,2),
+                     labels = c("Male", "Female"))
+irished$lvcert = factor(irished$lvcert,
+                        levels = c(0,1),
+                        labels = c("Not Taken", "Taken"))
+
+##Center the DVRT Score
+
+mean(irished$DVRT) #For reference
+irished$DVRT.cen = irished$DVRT - mean(irished$DVRT)
+
+##Boxplot to examine the centered DVRT score and the leaving certificate
+
+boxplot(DVRT.cen ~ lvcert, data = irished)
+
+
+```
+
+### Building a GLM for irished dataset 
+
+```{r}
+
+##For a binomial distribution (0,1 data), the link function is a logit function which uses the natural log (see slides). This acts to make the relationship linear
+
+irished.glm1 = glm(lvcert ~ DVRT.cen, data = irished,
+                   family = binomial(link = "logit"))
+
+summary(irished.glm1)
+
+```
+
+```{r}
+##Converting the coefficients from log-odds to odds
+
+exp(coef(irished.glm1))
+
+```
+
+- Coefficient Interpretation: Based on these coefficients, for a student with an average DVRT score, they have approximately a __0.76__ odds of obtaining a leaving certificate. For an increase of one unit in DVRT score, the student's odds will increase by __1.07__. This change is multiplicative meaning if the student's DVRT score changes by two units, the chances will increase by, $Odds = (0.76*1.07)*1.07$, and so on. 
+
+- **NOTE:** This output is in **odds* not probability. 
+
+- Odds to Probability is $P = Odds/(1+Odds)$. In this case, the probability is 0.43.
+
+```{r}
+0.76/(1+0.76)
+```
+
+### Prediction Using this Model
+
+```{r}
+##We need new data to run the model. The independent variable, DVRT, needs to be converted to a centered score in order for the model to use it as we used a centered DVRT score to construct the model.
+
+newDVRT = data.frame(DVRT.cen = 120 - mean(irished$DVRT)) ##DVRT.cen becomes the column header
+
+predict(irished.glm1,
+        newdata = newDVRT,
+        type = 'response',
+        se.fit = TRUE)
+
+```
+
+- The probability is __0.73__ that the student will obtain the certificate. The coefficients from the model are in odds. **NOTE:** This output gives you the probability due to the type = 'response' syntax. These are not equivalent. 
+
+- Odds are the ratios of probabilities between an event happening versus the probability that it won't. $Odds in favor of A = A/(1-A)$
+
+```{r}
+newDVRT.2 = data.frame(DVRT.cen = seq(60,160) - mean(irished$DVRT))
+
+lvcert.pred = predict(irished.glm1,
+                      newdata = newDVRT.2,
+                      type = 'response')
+
+##Plotting the DVRT score sequence 60 - 160 with the probability of obtaining the leaving certificate. It should appear like this graph with asymptotes as they approach 0% and 100% probability
+
+plot(newDVRT.2$DVRT.cen + mean(irished$DVRT),
+     lvcert.pred,
+     type = 'l',
+     col = 2,
+     lwd = 2,
+     xlab = 'DVRT',
+     ylab = 'Pr(lvcert)')
+     
+
+```
+
+```{r}
+
+anova(irished.glm1, test = 'Chisq')
+
+
+```
+
+- In this case, given the large _F_-statistic and small _p_-value we would reject the null hypothesis that the null (intercept model) is better. We accept the alternative hypothesis that the our current model is better.
+
+## Binomial Models 2
+
+```{r}
+
+turbines = read.csv("../datafiles/turbines.csv")
+head(turbines)
+
+
+```
+
+```{r}
+
+##Calculating the proportion of fissures to turbines
+##The plot includes additional observations? Or is this a prediction?
+turbines$prop = turbines$Fissures/turbines$Turbines 
+plot(prop ~ Hours, data = turbines)
+```
+
+```{r}
+
+turbine.glm = glm(prop ~ Hours,
+                  data = turbines,
+                  family = binomial(link = 'logit'),
+                  weights = Turbines)
+
+turbine.odds = exp(coef(turbine.glm))
+turbine.odds
+
+```
+
+Prediction
+
+```{r}
+
+newturbine = data.frame(Hours = 5000)
+predicted_probability = predict(turbine.glm,
+        newdata = newturbine,
+        type = 'response',
+        se.fit = TRUE)
+predicted_probability
+```
+
+## Poisson Models
+
+**Used for count data.**
+
+```{r}
+hsa = read.csv("../datafiles/hsa.csv", header = TRUE)
+hsa$prog = factor(hsa$prog,
+                  levels = c(1, 2, 3),
+                  labels = c("General", "Academic", "Vocational"))
+
+boxplot(math ~ num_awards, data = hsa)
+
+```
+
+```{r}
+boxplot(math ~ prog, data = hsa)
+```
+
+- Within this dataset there seems to be a relationship between the average math score and the number of awards. Additionally, the average math score varies by program.
+
+### Building a Poisson Model
+
+```{r}
+hsa.glm = glm(num_awards ~ math + prog,
+              family = poisson(link = 'log'),
+              data = hsa)
+
+summary(hsa.glm)
+```
+
+```{r}
+
+hsa.glm.transformed.coef = exp(coef(hsa.glm))
+hsa.glm.transformed.coef
+
+```
+
+**Coefficient Interpretation**
+
+- The intercept is the expected number of awards for a student with a zero math score in the general program. This is not particularly useful, however, we could re-run this analysis with a centered math score to produce a more meaningful intercept term.
+
+- The math coefficient, 1.07, is the award rate increase for a unit increase in math score. This is a positive relationship between math score and the number of awards. 
+
+- The academic program coefficient, 2.96, is the award rate increase for students in this group.
+
+- The vocational program coefficient, 1.45, is the award rate increase for students in this group.
+
+- Note: These coefficients are multiplicative. 
+
+**Prediction Model**
+
+```{r}
+##Create new data with a column for math and program - the same variables in the model. 
+hsa.new = data.frame(math = 70, prog = 'Academic')
+
+predict(hsa.glm,
+        newdata = hsa.new,
+        type = 'response',
+        se.fit = TRUE)
+
+```
+
+- The expected number of awards is 2 for this prediction.
+
+```{r}
+##Re-run the prediction for a student from the general program.
+hsa.new2 = data.frame(math = 70, prog = 'General')
+
+predict(hsa.glm,
+        newdata = hsa.new2,
+        type = 'response',
+        se.fit = TRUE)
+
+
+```
+
+- The expected number of awards is approximately 1 (0.71).
+
+# **EXERCISES**
+
+## 1. Bird Species in the Mediterranean 
+
+### 1.1 Boxplots
+```{r}
+island = read.csv("../datafiles/island2.csv", header = TRUE)
+
+
+##Note from Simon -
+##Don’t confuse the reference for a covariate dummy variable with the 0/1 outcome of a binary variable. The coefficients in the model are the probably of getting a ‘success’, or a 1 outcome. So your intercept is the probability of 1 or presence of the bird
+##Label the incidence as a factor and label it. The assumption is 0 means absent and 1 is present. 
+
+island$incidence = factor(island$incidence,
+                          levels = c(0,1),
+                          labels = c("Absent", "Present"))
+
+##Centered Data
+island$area.cen = island$area - (mean(island$area))
+island$isolation.cen = island$isolation - (mean(island$isolation))
+
+par(mfrow = c(1, 3)) ##Creating a multiple plot area with 1 row and 3 columns
+
+boxplot(area.cen ~ incidence, data = island,
+        ylab = "Area",
+        xlab = "Incidence",
+        main = "Incidence by Centered Area",
+         col = c("darksalmon", "darkseagreen"))
+
+boxplot(isolation.cen ~ incidence, data = island,
+        ylab = "Isolation",
+        xlab = "Incidence",
+        main = "Incidence by Centered Isolation",
+        col = c("darksalmon", "darkseagreen"))
+
+boxplot(quality ~ incidence, data = island,
+        ylab = "Quality",
+        xlab = "Incidence",
+        main = "Incidence by Quality",
+         col = c("darksalmon", "darkseagreen"))
+
+```
+
+- Based on these initial boxplots, the presence of birds (incidence) seems to correlate with the island's area and isolation. The relationship between area and presence is __positive__ while the relationship between isolation and presence is __negative__.  
+
+### 1.2 Generalized Linear Model Build
+```{r}
+##Initial uncentered model
+
+bird.pres.uncent.glm = glm(incidence ~ area + isolation,
+                    data = island,
+                    family = binomial(link = "logit"))
+
+summary(bird.pres.uncent.glm)
+
+```
+
+```{r}
+##Calculating the log odds to odds for the uncentered model
+incidence.uncen.odds = exp(coef(bird.pres.uncent.glm))
+incidence.uncen.odds
+```
+
+```{r}
+##Calculating the uncentered model probability
+Intercept.uncent.prob = 766.3669575 /(1+766.3669575 )
+Intercept.uncent.prob
+
+```
+
+```{r}
+##Centered Model
+bird.pres.glm = glm(incidence ~ area.cen + isolation.cen,
+                    data = island,
+                    family = binomial(link = "logit"))
+
+summary(bird.pres.glm)
+
+```
+
+```{r}
+##Convert the coefficients from log odds to odds
+
+incidence.odds = exp(coef(bird.pres.glm))
+incidence.odds
+
+```
+
+```{r}
+##To convert from odds to probability the equation is P = Odds/(1+Odds)
+Intercept.prob = 3.0507967/(1+3.0507967)
+Intercept.prob
+```
+
+
+### 1.3 Coefficient and AIC Interpretation
+- The __AIC is 34.4__ which can be used to compare this model against other models to determine which model is best for describing this data set. 
+
+- The __intercept for the uncentered model is 766.37__ which, is a probability of almost __1 (0.998)__. This means for that for an island with an area of zero and isolation of zero, there is almost statistical certainty that there will be bids present. This is not necessarily a useful interpretation for the intercept. After re-constructing the model with **centered data**, the **intercept is 3.05** which means there is a probability of **0.75** that there is a presence of birds on an island with an average area and isolation. 
+
+- The __area coefficient is 1.79__ which is a multiplicative coefficient that as the area increases by one unit, the odds of presence _increase_ by a rate of 1.79. 
+
+- The __isolation coefficient is 0.25__ which is also a multiplicative coefficient that as isolation increases by one unit, the odds of presence _decrease_ by a rate of 0.25. Since this value is less than 1, it indicates that it negatively affects the presence of birds. 
+
+
+### 1.4 Prediction
+
+```{r}
+##Create a new data frame
+##Use the uncentered model as the new data is given in the original scale.
+
+bird.data.new = data.frame(area = 5, isolation = 6)
+bird.predict = predict.glm(bird.pres.uncent.glm,
+                       newdata = bird.data.new,
+                       type = 'response',
+                       se.fit = TRUE)
+
+bird.predict
+
+```
+
+- This output tells us that the probability of bird presence on this new island is approximately __0.79__ with a standard error of __± 0.11__.
+
+## 2. Hemlock Trees in the Smoky Mountains
+
+### 2.1 Model Build
+
+```{r}
+tsuga = read.csv("../datafiles/tsuga.csv", header = TRUE)
+
+tsuga.glm = glm(cover ~ streamdist + elev,
+                data = tsuga,
+                family = poisson(link = 'log'))
+
+```
+
+
+### 2.2 Coefficient Interpretation
+
+```{r}
+summary(tsuga.glm)
+
+```
+- The intercept, __1.622__, are the log-odds for the abundance of Hemlock trees given a zero value for both elevation and distance to stream. The _p_-value (**2e-16**) is less than the critical threshold of 0.05 meaning it is statistically significant. 
+- The distance to stream coefficient, __-8.963e-04__, are the log-odds for the abundance of Hemlock trees if the elevation is held constant. The _p_-value (**2.15e-14**) is well below the critical threshold of 0.05 meaning it is statistically significant as an explanatory variable. 
+- The elevation coefficient, __8.901e-05__, are the log-odds for the abundance of Hemlock trees with other variables being held constant. The _p_-value is **0.115** which is above our critical threshold of 0.05 which means it is not statistically significant as an explanatory variable.
+-The model AIC is **3150** which can be used to compare models. 
+
+```{r, echo = FALSE, results = FALSE}
+##Building a new model with just cover and distance to stream to compare against the previous model. 
+
+tsuga.glm2 = glm(cover ~ streamdist,
+                 data = tsuga,
+                 family = poisson(link = "log"))
+summary(tsuga.glm2)
+
+## Interesting - The AIC is slightly higher. 
+
+anova(tsuga.glm2, tsuga.glm, test ="Chisq")
+##Could use a stepwise regression here?
+```
+
+
+### 2.3 Coefficient Transformation
+
+```{r}
+
+tsuga.glm.coef = exp(coef(tsuga.glm))
+tsuga.glm.coef
+
+```
+
+
+### 2.4 Model Interpretation 
+
+- This model attempts to explain the abundance of Hemlock trees as a function of distance to a stream and elevation. With a stream distance of zero (0) and elevation of zero (0), the abundance of trees would be classified as approximately five (5). The abundance changes negatively for an increase in distance to the stream. As poisson generalized linear model rates are multiplicative and the stream distance coefficient is less than 1 - in this case 0.999, this means the relationship is negative. The elevation coefficient is 1, and statistically insignificant meaning that elevation does not play an important role in the abundance of Hemlock trees.  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

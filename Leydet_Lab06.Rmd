@@ -1,0 +1,492 @@
+---
+title: "Leydet Lab 6 - Modeling 4"
+author: "David Leydet"
+date: "2022-09-29"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 3
+    theme: yeti
+---
+
+# **Practice** 
+
+```{r echo = TRUE, results = 'hide', message = FALSE}
+##Set working directory and load the packages for this lab. 
+
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab06")
+library(ggplot2)
+library(dplyr)
+library(nlme)
+library(tidyr)
+library(lme4)
+library(lattice)
+library(mgcv) ##for generalized additive models
+library(plotly) ##for interactive figures in html
+library(ggpubr) ##additional package for building figures
+
+```
+
+## **Hierarchical Linear Models**
+
+### **Data**
+```{r echo = TRUE, results = 'hide', message = FALSE}
+mathach = read.csv("../datafiles/MathAch.csv")
+
+mathach$sector = factor(mathach$sector, levels = c("Public", "Catholic")) #Convert sector variable to a factor (remember a factor is another term for category - it can be used for character strings and integer data)
+
+mses = tapply(mathach$ses, mathach$school, mean) ##created a mean SES score by school
+print(mses)
+mathach$meanses = mses[as.character(mathach$school)] ##creates a new column of mean ses scores by the nnumber of students in each school??? as.character function?
+
+mathach$centered.ses = mathach$ses - mathach$meanses ##creates a centered SES score by student based on their school
+
+```
+
+
+```{r}
+
+##Quick Plot (ggplot) to create the boxplot
+
+
+
+math.sector.plot = qplot(sector, mathach, data = mathach, fill = sector,
+      geom = 'boxplot',
+      xlab = "Sector",
+      ylab = "Math Achievement Score",
+      main = "Math Achievement by School Type") 
+
+ses.plot = ggplot(data = mathach, aes(x = sector, y = ses)) +
+                     geom_boxplot(aes(fill = sector)) +
+                     xlab("Sector") +
+                     ylab("Socioeconomic Status") +
+                     labs(title = "Socioeconomic Status by School Type",
+                          subtitle = "By David Leydet")
+
+
+figure.comb = ggarrange(math.sector.plot, ses.plot,
+                    labels = c("A", "B"),
+                    ncol = 2, nrow = 1)
+
+figure.comb
+
+
+```
+
+### **Model Build**
+
+
+```{r}
+
+## Building a hierarchical model to explain the relationship between math score and SES in these two school sectors (Public and Catholic), but wish to account for variability between schools (individually?). 
+
+math.lme1 = lme(mathach ~ meanses * centered.ses + sector*centered.ses,
+                random = ~ centered.ses | school,
+                data = mathach)
+
+summary(math.lme1)
+
+```
+
+- From the lab -
+- The table of fixed effects is similar to output from lm(); to interpret the coefficients in this table, refer to the hierarchical form of the model given in the equation above.
+- (Intercept): The grand mean intercept - the average math achievement score in public schools (for a perfectly average student in a perfectly average public school)
+- sectorCatholic: Difference of average math achievement in Catholic schools. So all else being equal, students at Catholic schools do better
+- cses: The grand mean slope - average slope in public schools (i.e. the rate of increase in math score for a unit increase in centered SES, for students in a perfectly average public school)
+- cses:sectorCatholic: Difference of average slope in Catholic schools. All else being equal, student math scores are less affected by their SES level in Catholic schools as the slope is lower.
+- meanses: Relationship of schools’ average level of math achievement to their average level of SES. In other words, this tells us how the school-level characteristics are related to each other. For a one unit increase in mean school SES, the average school math score increases by about 5.3 points (note that this is the same for both sectors)
+- meanses:cses: Within school slope change for one unit increase in mean SES. This final coefficient tells us about the impact of the mean school level SES on the relationship between math and SES for individuals at that school. As this is positive, this implies that as the overall mean SES of a school increases, the within school effect of SES on math score also increases.
+
+```{r}
+
+VarCorr(math.lme1)
+
+```
+
+
+### **Testing Random Effects**
+
+```{r}
+
+math.lme2 = update(math.lme1, random = ~ 1 | school) ##removes the variation of the slope of the centered ses as a random effect across schools. This uses a single slope for all schools by updating the random effect part of the model to only include the intercept
+
+anova(math.lme1, math.lme2) ##Model comparison
+
+```
+- The evidence suggests that the variation of slopes among schools is not significant.
+
+```{r}
+
+## Remove the random effect between schools.
+
+math.lme3 = update(math.lme1, random = ~ centered.ses - 1 | school)
+
+anova(math.lme1, math.lme3)
+```
+- The evidence suggests that including the variation of intercept among schools is a good thing for the model. 
+
+## **Generalized Hierarchical Linear Models**
+
+```{r}
+
+sppint = read.csv("../datafiles/speciesIntro2.csv")
+str(sppint)
+
+```
+
+```{r}
+##Data cleanup
+##Need to create a proportion of success to failure by species.
+
+sppint$total = sppint$success + sppint$failure
+sppint$prop = sppint$success / sppint$total
+
+sppint.bplot = ggplot(data = sppint, aes(x = location, y = prop)) +
+                        geom_boxplot(aes(fill = location))+
+                        labs(title = "Species Success Probability") +
+                        xlab("Location") +
+                        ylab("Probability")
+
+sppint.bplot
+```
+
+### **Model Build**
+
+```{r}
+
+##Use glmer from the lme4 package to build this model. This is for fitting generalized linear mixed-effects models
+
+spp.glm1 = glmer(prop ~ location + (1 | species), ##Syntax 1 | species means to vary the intercept by species groups.
+                 family = binomial, #use this because it is proportional data? 0,1?
+                 weights = total, #because we are modeling proportions this argument specifies the total number of trials for each species
+                 data = sppint)
+
+summary(spp.glm1)
+
+```
+
+```{r}
+##Odds and probability conversion from log-odds
+
+argprob = exp(-0.615) / (1 + exp(-0.615))
+ausprob = exp(-0.64880 ) / (1 + exp(-0.64880))
+canprob = exp(0.06737  ) / (1 + exp(0.06737))
+chiprob = exp(0.52650   ) / (1 + exp(0.52650))
+
+prob.df = data.frame(argprob, ausprob, canprob, chiprob)
+prob.df
+
+```
+```{r}
+
+##Model the probability as a function of the intercept, with a random effect by species. This subtracts out the location
+spp.glm2 = glmer(prop ~ 1 + (1 | species), 
+                 data = sppint,
+                 family = binomial,
+                 weights = total)
+
+anova(spp.glm1, spp.glm2) ##Comparing the two models (glm1 = with location; glm2 = without location)
+
+```
+
+- Based on this test, the model with location is better than the one without. So we reject the null hypothesis in favor of the alternative (more complex model) hypothesis. 
+
+
+## **Generalized Additive Models**
+
+Generalized Additive Models (GAMs) use methods to fit the model to the data locally, using splines to account for non-linear relationships. They also include the possibility to specify the distribution family and link function for the dependent variable. 
+
+```{r}
+
+ozone = read.csv("../datafiles/ozone.csv")
+
+
+##Building the GAM
+
+ozone.gam = gam(ozone ~ s(temp) + s(wind),
+             data = ozone) #GAM created with smoothing splines for temp and wind - the s() argument
+
+summary(ozone.gam)
+```
+
+```{r}
+plot(ozone.gam,
+      resid = TRUE, ##plots the residuals instead of just showing the model line
+      pch = 16, ##filled in circle symbols
+      col = "blue",
+      ylab = "Ozone",
+      xlab = "Temperature",
+      main = "Ozone as a Function of Temperature",
+      select = 1) ##selects the parameter...in this case temperature first.
+
+
+```
+
+```{r}
+plot(ozone.gam,
+      resid = TRUE, ##plots the residuals instead of just showing the model line
+      pch = 17, ##filled in circle symbols
+      col = "purple",
+      ylab = "Ozone",
+      xlab = "Wind Speed",
+      main = "Ozone as a Function of Wind Speed",
+      select = 2) ##selects the parameter...in this case wind speed.
+
+
+```
+
+```{r}
+##Perspective Plot
+vis.gam(ozone.gam, color = "cm",
+        theta = 230, ##horizontal viewing angle
+        phi = 15) ##vertical viewing angle
+
+```
+
+```{r}
+##Creating a time series plot
+
+##Create the index variable
+
+time.idx = seq(1, length(ozone$ozone))
+
+plot(time.idx, ozone$ozone,
+      type = "l",
+      col = "blue",
+      xlab = "Time", 
+      ylab = "Ozone Concentration (ppb)",
+      main = "Ozone Time Series")
+
+lines(fitted(ozone.gam), col = "red", lty = 2) ##put the fitted model line over the data. The fitted argument extracts the fitted model values
+
+legend("topleft",
+       legend = c("Observed", "Estimated"), ##What text to write in the legend
+       lty = 1, ##line type
+       col = c("blue", "red")) ##colors for the legend lines
+
+```
+
+```{r}
+
+newclim = data.frame(temp = 85, wind = 5)
+
+ozone.pred = predict(ozone.gam, newdata = newclim, se.fit = TRUE)
+
+print(ozone.pred)
+
+```
+
+
+```{r}
+##Wind speed increase to 15 m/s
+
+newclim2 = data.frame(temp = 85, wind = 15)
+
+predict(ozone.gam, newdata = newclim2, se.fit = TRUE)
+```
+
+
+
+# **EXERCISES**
+
+## **1. GapMinder Data**
+
+### **1.1 Data Read**
+
+```{r}
+##Read in the data
+
+gapdata = read.csv("../datafiles/gapminderData5.csv")
+
+##Estimate mean life expectancy by country
+
+mean.lifeexp = tapply(gapdata$lifeExp, gapdata$country, mean)
+
+mean.lifeexp
+
+```
+
+```{r echo = FALSE}
+#newdf = 
+
+
+
+```
+
+### **1.2 Scatterplot of Life Expectancy by Country By Year**
+```{r}
+
+gapdata$year.factor = as.factor(gapdata$year)
+gapdata$country.factor = as.factor(gapdata$country)
+
+##paste("country:", country) syntax allows the country to pop up when using ggplotly to plot this figure**
+
+life.exp.plot1 = ggplot(data = gapdata, aes(x = year.factor, y = lifeExp, text = paste("country:", country), color = continent)) + 
+  geom_point(alpha = 0.6) + 
+  labs(title = "Life Expectancy by Country",
+       subtitle = "By Dave Leydet") +
+  xlab("Year") +
+  ylab("Life Expectancy (Years)") 
+ 
+
+ggplotly(life.exp.plot1) 
+
+#Trying to color by country is too much. This displays a warning message to change the bin width.
+
+```
+
+```{r}
+#facet_wrap by continent to break out the data a bit. After some minor code modification the plotly tool will display the country by hovering over it. 
+
+life.exp.plot2 = life.exp.plot1 +
+   facet_wrap( ~ continent) +
+   theme(axis.text.x = element_text(angle = 75, hjust = 1))
+
+ggplotly(life.exp.plot2)
+
+```
+
+
+
+### **1.3 Line Plots of Life Expectancy by Year for Afghanistan and Chad**
+
+```{r}
+afg.sub = subset(gapdata, country == "Afghanistan") ##subset the data to make an Afghanistan data frame
+chad.sub = subset(gapdata, country == "Chad")
+```
+
+```{r}
+life.line = ggplot(data = afg.sub, aes(x = year, y = lifeExp)) +
+  geom_line(aes(color = "lightgreen")) +
+  geom_line(data = chad.sub, aes(color = "indianred1")) +
+  labs(title = "Chad and Afghanistan Life Expectancy") +
+  xlab("Year") +
+  ylab("Life Expectancy") +
+  guides(colour = guide_legend(title = "Country")) +
+  ##changes the legend title
+  scale_color_discrete(labels = c('Chad', 'Afganistan'))
+  ##changes the legend values
+
+life.line
+
+```
+
+### **1.4 Linear Model (lifeExp by year)**
+
+```{r}
+
+## Center the year data
+gapdata$year.cen = gapdata$year - 1952 
+
+## Linear Model Build
+
+life.exp.lm1 = lm(lifeExp ~ year.cen, data = gapdata)
+
+summary(life.exp.lm1)
+```
+- The intercept term is **50.5** meaning that for a value of zero (0) for the year the average life expectancy is 50.5. Please note that a value of zero (0) indicates our starting year of 1952. The _p_-value is **2e-16** which means this coefficient is statistically significant as it is below our critical threshold of 0.05.  
+- The year.cen coefficient is **0.33** meaning that for a one unit increase in year, the expected life expectancy will increase by 0.33. The _p_-value is **2e-16** which means the year as an explanatory variable is statistically significant as it is below our critical threshold of 0.05. 
+- The _F_-statistic is rather large - **398.6** - and the _p_-value is **2e-16**. Based on these metrics, we would reject the null hypothesis that the null model (intercept model) is better than our current model. 
+
+
+
+### **1.5 Random Intercept Model (Country as grouping variable)**
+
+```{r}
+
+life.exp.coun.lme = lme(lifeExp ~ year.cen,
+                random = ~ 1 | country,
+                data = gapdata,
+                method = "ML")
+
+summary(life.exp.coun.lme)
+
+
+```
+
+- The fixed effects coefficients for this model are:
+  + Intercept: **50.5** with a _p_-value of **0**.
+  + Year.cen: **0.33** with a _p_-value of **0**.
+
+
+### **1.6 ICC Calculation**
+```{r}
+
+var.cor.coef = VarCorr(life.exp.coun.lme)
+var.cor.coef
+
+```
+
+```{r}
+##Calculate the percentage of the variance explained by the intercept varying by country
+
+coef.1.int = as.numeric(var.cor.coef[1,1])
+coef.2.res = as.numeric(var.cor.coef[2,1])
+total.var = coef.1.int + coef.2.res
+
+int.percentage = (coef.1.int / total.var) * 100
+int.percentage
+res.percentage = (coef.2.res / total.var) * 100
+res.percentage
+```
+- The ICC calculated in this model is approximately **91%** meaning that 91% of the variance is explained by allowing the intercepts to vary by country. Given this high value, it supports the use of a random intercept model.
+
+
+### **1.7 Random Intercept and Slope Model**
+```{r}
+
+life.exp.coun.year.lme = lme(lifeExp ~ year.cen,
+                             random = ~year.cen | country,
+                             data = gapdata,
+                             method = "ML")
+
+summary(life.exp.coun.year.lme)
+
+#Note - Discuss the output with others to ensure my understanding of this output.
+##Random effects coefficients:
+# Amount of variation across countries and years? This is why we run the intra-class correlation (ICC)? 
+
+
+##Fixed effects coefficients:
+##Intercept: ~50.5 (grand mean intercept; average life expectancy across countries and years)
+##year.cen: ~0.33 (change in life expectancy for every year across countries)
+
+```
+
+```{r}
+##ICC exploration for this model (Not required, just curious).
+var.cor.coef2 = VarCorr(life.exp.coun.year.lme)
+var.cor.coef2
+
+coun.year.lme.total.var = as.numeric(var.cor.coef2[1,1]) + as.numeric(var.cor.coef2[2,1]) + as.numeric(var.cor.coef2[3,1]) #Intercept + year.cen + residual
+
+year.cen.ICC = (as.numeric(var.cor.coef2[2,1]) / coun.year.lme.total.var) *100
+year.cen.ICC
+
+##Based on this, it is not worth having the slopes vary by year. Double check with the AIC run to see if this matches the output and conclusion from there.
+```
+
+### **1.8 AIC Calculation and Model Comparison**
+```{r}
+
+AIC(life.exp.lm1, life.exp.coun.lme, life.exp.coun.year.lme)
+
+```
+- Based on the output of this AIC, the third model, which includes the countries and years as random effects, is the best model with an AIC of **8742**. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

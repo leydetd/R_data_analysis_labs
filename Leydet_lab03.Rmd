@@ -1,0 +1,404 @@
+---
+title: "Leydet_Lab03"
+author: "David Leydet"
+date: "2022-09-07"
+output: html_document
+---
+
+GEOG6000 Methods of Data Analysis Lab 03
+
+Experiment using R Markup in HTML
+
+Plotting Types
+```{r}
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab03") ##Set working directory
+
+##Bar Plots
+
+VAdeaths = read.csv("../datafiles/VAdeaths.csv", row.names = 1)
+mycol = heat.colors(5)
+barplot(as.matrix(VAdeaths), beside=T, legend = rownames(VAdeaths),
+        col = mycol,
+        main = "VA Deaths by Age",
+        ylab = "Number of Deaths",
+        xlab = "Location and Sex")
+```
+
+Dot Charts!
+
+```{r}
+
+VAdeaths.m = as.matrix(VAdeaths)
+dotchart(VAdeaths.m)
+
+```
+```{r}
+##Transpose the matrix --> Ask about this in lab...I am still having difficulty conceptualizing the data organizing coding we are using***
+
+##Data Structures
+#Data can be numeric, factor, character, or boolean
+#Vector is a set a values in one dimension
+#Matrix is a 2 dimensional type rows/columns
+#Array is like a matrix with more then 2 rows/columns
+#Data Frame like csv file
+##'as' functions convert data types to use for the function, i.e. as.matrix
+
+dotchart(t(VAdeaths.m)) 
+
+##Transpose for rural/urban category to the age bracket##
+
+```
+
+Plotting Multiple Series with Points
+
+```{r}
+
+cmp = c(52, 57, 62, 67, 72)
+plot (cmp, VAdeaths$Rural.Male, pch = 1, col= 1, ylim = c(0,70),
+      xlab = "Age Class",
+      ylab = "Mortalitiy",
+      main = " Virginia Death Rates")
+points(cmp, VAdeaths$Rural.Female, pch = 2, col = 2)
+points(cmp, VAdeaths$Urban.Male, pch = 3, col = 3)
+points(cmp, VAdeaths$Urban.Female, pch = 4, col = 4)
+legend("topleft", legend = c("Rural Male", "Rural Female", "Urban Male", "Urban Female"),
+       col = c(1, 2, 3, 4), pch = c(1,2,3,4))
+##This code concatenated the each group to its own symbol and color on the plot and legend.
+##1, 2, 3, 4 was in order of rural male, rural female, urban male, and urban female
+```
+
+Plotting Multiple Series with Lines
+
+```{r}
+
+ipcc = read.csv("../datafiles/ipccScenario_1900_2100.csv")
+plot(ipcc$yrs, ipcc$commitMed, 
+     type = 'l',
+     lwd = 1,
+     col = 'orange',
+     ylim = c(-1.0,3.5), 
+     main = 'IPCC Scenarios', 
+     xlab = 'Years',
+     ylab = 'Global Temp.')
+lines(ipcc$yrs, ipcc$b1Med, lwd = 1, col = "blue")
+lines(ipcc$yrs, ipcc$a1bMed, lwd = 1, col = 'green')
+lines(ipcc$yrs, ipcc$a2Med, lwd = 1, col = 'red')
+###This plot takes multiple data and plots them against a common x axis which is in the first part of the plot and line argument
+
+abline(h = 0, lty = 2)
+legend("topleft", legend = c("Commit", "B1", "A1B", "A2"), 
+       lty = 1,
+       lwd = 1,
+       col = c('orange', 'blue', 'green', 'red'))
+
+##Experiment with elements of the chart to make it more visually appealing
+```
+
+Plotting Polygons
+
+```{r}
+
+plot(ipcc$yrs, ipcc$commitMed, 
+     type = 'n', 
+     ylim = c(-1.5,1.0), 
+     main = 'Commit Scenario',
+     xlab = 'Years',
+     ylab = 'Global Temp.')
+##This produces a "blank plot with an x and y axis along with labels
+
+polygon(c(ipcc$yrs,rev(ipcc$yrs)),c(ipcc$commitLo,rev(ipcc$commitHi)), 
+        col = 'orange')
+##How does the "rev" function work??****
+##Need to reverse it in order to give it its total set of vertices instead of going back to the beginning (think drawing as opposed to typewriter)
+
+lines(ipcc$yrs, ipcc$commitMed, 
+      lwd = 2, 
+      col = 'black')
+
+```
+
+Polygon Fill with Shading Lines 
+
+```{r}
+
+plot(ipcc$yrs, ipcc$commitMed, 
+     type = 'n', 
+     ylim = c(-1.5,1.0))
+
+polygon(c(ipcc$yrs,rev(ipcc$yrs)),c(ipcc$commitLo,rev(ipcc$commitHi)), 
+    col = 'orange', 
+    density = 20, 
+    angle = 145)
+lines(ipcc$yrs, ipcc$commitMed, 
+      lwd = 2, 
+      col = 'black')
+
+```
+
+Plotting Images 
+
+```{r}
+
+volcano = read.table("../datafiles/volcanodem.txt")
+volcano = as.matrix(volcano)
+##Where do the the V"n" columns come from? Matrix transition?
+
+z = 2 * volcano ##Exaggerate the relief
+x = 10 * (1:nrow(z))
+y = 10 * (1:ncol(z))
+
+##Not sure how we are organizing the data here.
+
+image(x, y, z)
+
+```
+
+Image with better color scheme:
+```{r}
+
+image(x, y, z, col = terrain.colors(100))
+
+```
+
+Contour Plot:
+
+```{r}
+contour(x, y, z, nlevel = 20)
+
+##Can this be used for isopleths???
+
+```
+
+Perspective Plot:
+```{r}
+
+persp(x, y, z,theta = 210, phi = 15, scale = FALSE)
+
+##Neat!
+
+```
+
+Shaded Perspective Plot
+
+```{r}
+
+persp(x, y, z, 
+      theta = 130, 
+      phi = 30, 
+      scale = FALSE, 
+      col = 'green3', 
+      ltheta = -120, 
+      shade = 0.75, 
+      border = NA, 
+      box = FALSE)
+
+##ltheta controls the light angle
+##shade controls the diffusion of the lighting 
+#phi is the vertical angle
+#theta is the horizontal view angle
+
+```
+
+
+```{r}
+pdf('volcano.pdf')
+image(x, y, z, 
+      col = terrain.colors(100), 
+      main = "Maunga Whau DEM")
+dev.off()
+
+##Export to .pdf
+```
+
+
+Simple Linear Regression
+
+```{r}
+
+regrex = read.csv("../datafiles/regrex.csv")
+summary(regrex)
+
+
+```
+
+
+```{r}
+plot( y ~ x, data=regrex)
+
+```
+
+```{r}
+cor.test(regrex$x, regrex$y)
+```
+
+```{r}
+
+ex1.lm = lm( y ~ x, data = regrex)
+ex1.lm
+
+```
+```{r}
+
+anova(ex1.lm)
+##Is this appropriate given only two variables?
+
+```
+
+```{r}
+
+summary(ex1.lm)
+
+```
+This model seems to be a good fit based on the residuals distribution, p-value, and adjusted r-squared
+
+Plotting the regression with a line
+```{r}
+
+plot( y ~ x, data = regrex,
+      main = "Linear Regression Example",
+      xlab = "X",
+      ylab = "Y",
+      col = "blue",
+      pch = 2)
+abline(ex1.lm, col = "red")
+
+```
+
+Model Standard Errors
+```{r}
+predict(ex1.lm, level = 0.95, interval = "conf")
+
+##What am I looking at?
+##Fit = predicted value
+##lwr = lower interval
+##upr = upper interval -> In this case 95%?
+```
+
+```{r}
+newx = data.frame(x = -1:30) ##New data frame with values x from -1 to 30
+
+newy = predict(ex1.lm, newdata = newx,
+               level = 0.95,
+               interval = "conf") ##prediction of our new y values with our new data newx
+
+str(newy)
+
+plot( y ~ x, data=regrex, 
+    pch = 16,
+    main = 'Model Confidence Intervals')
+
+lines(newx$x, newy[,"fit"], col = 2) ##predicted values of x...or fit?
+lines(newx$x, newy[,"lwr"], col = 3, lty = 2) ##lower confidence interval?
+lines(newx$x, newy[,"upr"], col = 3, lty = 2) ##upper confidence interval?
+
+```
+
+Residual Plots
+
+```{r}
+
+ex1.res = residuals (ex1.lm) ##creating a variable for the residuals
+hist(ex1.res)
+
+```
+
+```{r}
+
+plot(ex1.lm, which = 1)
+
+##Question on this
+
+```
+
+```{r}
+
+plot(ex1.lm, which = 2)
+
+```
+
+```{r}
+
+plot(ex1.lm, which = 4)
+
+```
+
+```{r}
+
+shapiro.test(ex1.res)
+
+#The null hypothesis is that the data are normally distributed. Here we get a high p-value, and no evidence to reject the null.
+
+```
+
+GG PLot Example During Lab (September 8, 2022)
+
+```{r}
+library(ggplot2)
+library(ggthemes)
+
+head(ipcc)
+
+##need to put it into long format data
+
+plot_df = data.frame(
+  yrs = rep(ipcc$yrs, 4), #replicate 4 columns by year
+  cilo = c(ipcc$commitLo, ipcc$b1Lo, ipcc$a1bLo, ipcc$a2Lo),
+  cihi = c(ipcc$commitHi, ipcc$b1Hi, ipcc$a1bHi, ipcc$a2Hi),
+  med = c(ipcc$commitMed, ipcc$b1Med, ipcc$a1bMed, ipcc$a2Med),
+  scenario = rep(c('Commit', 'b1', 'a1b', 'a2'), each = nrow(ipcc))
+)
+
+plot_df
+
+ggplot(plot_df, aes(x = yrs, y=med, col = scenario)) +
+  geom_line(size = 1.25) +
+  theme_fivethirtyeight()
+
+```
+
+Simon's Code
+
+```{r}
+
+a2_ipcc <- subset(plot_df, scenario == "a2")
+ggplot(a2_ipcc, aes(x = yrs)) +
+  geom_ribbon(aes(ymin = cilo, ymax = cihi), alpha = 0.5, 
+              col = NA, fill = 'skyblue') +
+  geom_line(aes(y = med), size = 1.25) +
+  theme_bw()
+
+ggplot(plot_df, aes(x = yrs, col = scenario, fill = scenario)) +
+  geom_ribbon(aes(ymin = cilo, ymax = cihi), alpha = 0.25) +
+  geom_line(aes(y = med), size = 1.25) +
+  theme_bw()
+
+ggplot(plot_df, aes(x = yrs, col = scenario, fill = scenario)) +
+  geom_ribbon(aes(ymin = cilo, ymax = cihi), alpha = 0.25) +
+  geom_line(aes(y = med), size = 1.25) +
+  theme_bw() +
+  facet_wrap(~ scenario)
+
+
+
+```
+
+```{r}
+##Model Confidence Interval versus Prediction Model Confidence Interval
+
+##We are 95% sure that the model line will fall between the confidence interval lines
+
+##Prediction interval 
+
+
+
+
+```
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,1164 @@
+---
+title: "Leydet_Lab09"
+author: "David Leydet"
+date: "2022-10-27"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: yeti
+---
+
+**Spatial Regression I**
+
+```{r Initial Setup, message = FALSE}
+
+## Set working directory
+
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab09")
+
+library(RColorBrewer) #color palettes
+library(sf) #simple features for spatial data
+library(spdep)
+library(spatialreg)
+library(tmap) #mapping package
+library(kableExtra) #table modification
+library(dbscan) # density based clustering
+
+
+```
+
+
+
+# **Reading the Data**
+
+```{r Data Read - Boston Data}
+
+##Boston Data Read - shapefile
+
+boston = st_read("../datafiles/boston.tr/boston.shp", 
+                 quiet = TRUE)
+
+##Boston Plot with sf
+plot(st_geometry(boston))
+
+##Boston Plot with tmap
+tm_shape(boston) +
+  tm_borders()
+ 
+```
+
+
+```{r Data Read - New York Data}
+
+##NY Data Read
+
+NY8 = st_read("../datafiles/NY_data/NY8_utm18.shp", 
+              quiet = TRUE)
+
+plot(st_geometry(NY8))
+
+tm_shape(NY8) + 
+  tm_borders() +
+  tm_fill("POP8",
+          title = "Population") + 
+  tm_layout(legend.outside = TRUE,
+            legend.title.size = 1,
+            legend.text.size = 0.6,
+            legend.position = c("right","top"),
+            legend.bg.alpha = 1) 
+
+```
+
+```{r NY8 Data Structure}
+
+head(NY8)
+
+```
+
+
+```{r Histgram - Number of Cases per Tract}
+
+##Simple histogram
+
+hist(NY8$TRACTCAS,
+     xlab = "Cases per Tract")
+
+
+```
+
+
+```{r Thematic Map, warning = FALSE}
+
+##Build a thematic map by specifying the column (attribute) that you wish to plot
+
+## Create a color palette
+my.pal = brewer.pal(n = 9, "YlOrRd")
+
+## Create the thematic map
+
+plot(NY8["Cases"],
+     main = "New Yok Leukemia Cases",
+     col = my.pal)
+
+
+```
+
+
+# **Building the Spatial Weight Matrix**
+
+```{r Visualize the Neighborhood Structure}
+
+##Extract the polygons for Syracuse
+syracuse = NY8[NY8$AREANAME == "Syracuse city", ]
+
+## Store the geometry of the polygons
+syracuse.geom = st_geometry(syracuse)
+
+## Store the centroids of the polygons
+syracuse.coords = st_centroid(syracuse.geom)
+
+## Plot the geometry. The reset=FALSE syntax allows you to keep the plot and add more layers. The add=TRUE syntax adds it to the current plot
+plot(syracuse.geom, reset = FALSE)
+plot(syracuse.coords, pch = 16, col = 2, add = TRUE)
+
+```
+
+## **Neighborhood Functions**
+
+```{r Boundary Methods - Queens Case}
+
+## This method connects polygons that touch boundaries or corners
+
+sy1_nb = poly2nb(syracuse)
+
+## Visualize the neighborhood structure
+
+plot(syracuse.geom, 
+     main = "Syracuse Neighborhood Structure (Queen)",
+     reset = FALSE)
+plot(sy1_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+
+```
+
+
+```{r Boundary Methods - Rooks Case}
+
+## This method connects polygons that touch boundaries only
+
+sy2_nb = poly2nb(syracuse, queen = FALSE)
+
+## Visualize the neighborhood structure
+
+plot(syracuse.geom, 
+     main = "Syracuse Neighborhood Structure (Rook)",
+     reset = FALSE)
+plot(sy2_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+
+
+
+```
+
+```{r Plotting Neighborhood Structures Side by Side}
+
+par(mfrow = c(1,2))
+
+plot(syracuse.geom, 
+     main = "Queen",
+     reset = FALSE)
+plot(sy1_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+
+plot(syracuse.geom, 
+     main = "Rook",
+     reset = FALSE)
+plot(sy2_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+
+```
+
+## **Centroid Methods**
+
+### **Delaunay Triangulation**
+
+```{r Delaunay Triangulation}
+
+## Triangulation is built between sets of three points. It is joined as long as no other points are found in a circle fit to the three points:
+
+sy3_nb = tri2nb(syracuse.coords)
+
+
+## Visualize
+
+plot(syracuse.geom, 
+     main = "Delaunay Triangulation",
+     reset = FALSE)
+plot(sy3_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+
+
+```
+
+### **Sphere of Influence Method**
+
+```{r Sphere of Influence}
+
+## Restricts the links formed by Delauney triangulation to a certain length.
+
+sy4_nb = graph2nb(soi.graph(sy3_nb, syracuse.coords))
+
+plot(syracuse.geom, 
+     main = "Sphere of Influence",
+     reset = FALSE)
+plot(sy4_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+```
+
+
+### **_k_ nearest neighbors**
+
+```{r k nearest neighbors}
+
+## Here each region is linked to its k nearest neighbors irrespective of the distance between them
+
+sy5_nb = knn2nb(knearneigh(syracuse.coords, k = 1))
+sy6_nb = knn2nb(knearneigh(syracuse.coords, k = 2))
+
+par(mfrow = c(1,2))
+
+plot(syracuse.geom, 
+     main = "k = 1",
+     reset = FALSE)
+plot(sy5_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+plot(syracuse.geom, 
+     main = "k = 2",
+     reset = FALSE)
+plot(sy6_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+
+```
+
+
+### **Distance Functions**
+
+```{r Distance Functions}
+
+## Distance functions link together two regions if their centroids are within a certain distance of each other. This requires a minimum distance (d1) and a maximum distance (d2).
+
+## Here we will set the maximum to 75% of the largest distance obtained when using 2 nearest neighbors (sy6_nb). We obtain all the distances between nearest neighbor pairs in the first line of code (this extracts distances as a list with nbdists() and converts them into a vector with unlist()). Then we find the maximum of these distances. Finally we set d2 to this value ∗0.75.
+
+dists = nbdists(sy6_nb, syracuse.coords)
+
+## Create a vector for the distance values
+dists = unlist(dists)
+
+## Find the maximum distance
+max_1nn = max(dists)
+
+## Create the neighborhood structure using the distance method
+sy7_nb = dnearneigh(syracuse.coords, d1 = 0, d2 = 0.75*max_1nn)
+
+plot(syracuse.geom, 
+     main = "Maximum Distance (0.75)",
+     reset = FALSE)
+plot(sy7_nb, syracuse.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+```
+
+
+### **Editing Neighborhood Structures**
+
+```{r Editing Structures}
+
+## While these function provide a quick way to establish a neighborhood structure, they will likely include some connections that are unrealistic or exclude some real connections. It is possible to edit the neighborhood structure directly - this is simply a list of n vectors, where each vector contains the neighbors linked to a single polygon. 
+
+## See the contents of the neighborhood structure vector
+
+str(sy1_nb)
+
+## Access the first polygon's neighbors
+
+sy1_nb[[1]]
+
+## See appendix for editing structures using the edit.nb() function
+
+```
+
+
+### **Spatial Weights**
+
+```{r Spatial Weights - Binary and Row Standardization}
+
+## First method - binary (0 = no connection, 1 = connection)
+
+sy1_lw_b = nb2listw(sy1_nb, style = 'B')
+
+
+## Second method - row standardization (0 = no connection, weight = 1/total # of connections)
+
+sy1_lw_w = nb2listw(sy1_nb, style = 'W')
+
+
+```
+
+
+```{r Spatial Weights - Inverse Method}
+
+## Weights could be assigned by an inverse distance method, where closer neighbors have higher weights. To do this, we need the list of distances along each join for the neighborhood structure that we will use. 
+
+## First, we extract the distances from the neighborhood list (nbdists()), to obtain a list of distances. 
+
+## We then generate inverse distances by dividing by 1000 (to make these a little more manageable) and taking the reciprocal. This is a little complex as we obtain a list output from nbdists(). 
+
+## We create a new function, invd(), which calculates the inverse distance in kilometers (the coordinates are in meters). Then we apply this function to each item in the list using lapply(). This is the list version of the function apply() that we have used earlier.
+
+## Extract distances
+
+dists = nbdists(sy1_nb, syracuse.coords)
+
+## Generate inverse distances. Dividing by 1000 makes the distances more manageable
+
+inverse_distance = function(x) {1/(x/1000)}
+
+## Apply this function (lapply) to our distance extraction
+
+idw = lapply(dists, inverse_distance)
+
+## Generate the weights
+
+sy1_lw_idwB = nb2listw(sy1_nb, glist = idw, style = "B")
+
+
+```
+
+
+
+# **Checking for Autocorrelation**
+
+## **Visual Checks**
+
+```{r Boston House Prices}
+
+## Create a column of log house prices
+
+boston$logCMEDV = log(boston$CMEDV)
+
+## View the histogram
+
+hist(boston$logCMEDV)
+
+
+```
+
+
+```{r Boston CMEDV Plot}
+
+cmedv.pal = brewer.pal(5, "Accent")
+ellie.pal = brewer.pal(5, "PiYG")
+
+tm_shape(boston) +
+  tm_fill("logCMEDV",
+          palette = cmedv.pal)
+
+```
+
+
+```{r Boston Neighborhood Structure}
+
+## Build the neighborhood structure using the queen's method
+boston.nb = poly2nb(boston, queen = TRUE)
+
+## Create the centroids
+
+boston.coords = st_centroid(st_geometry(boston))
+
+## Visualize them
+
+plot(st_geometry(boston), 
+     main = "Neighborhood Structure (Queen's)",
+     reset = FALSE)
+plot(boston.nb, boston.coords, 
+     add = TRUE, 
+     col = 2, 
+     lwd = 1.5)
+
+```
+
+```{r Convert to Spatial Weight Matrix}
+
+boston.listw = nb2listw(boston.nb)
+
+```
+
+
+## **Global Moran's _I_**
+
+```{r Global Morans}
+
+## Run the Global Moran's I test to look for auto correlation. Randomization assumtion is set to TRUE as we don't know about any larger spatial trends in the data. Two sided meaning postive or negative autocorrelation. 
+
+moran.test(boston$logCMEDV,
+           listw = boston.listw,
+           alternative = "two.sided",
+           randomisation = TRUE)
+
+```
+
+- Evidence here for strong spatial autocorrelation given the standard deviate, I statistic, and p-value.
+
+```{r Global Morans - Normality Assumption}
+
+## Purely for the sake of comparison, we’ll also calculate Moran’s I under the normality assumption, stating that the pattern of house prices in Boston is a subset of a larger spatial trend. You should see a slight change in the variance calculated, but not enough to affect our conclusion that the data are strongly autocorrelated.
+
+moran.test(boston$logCMEDV,
+           listw = boston.listw,
+           alternative = "two.sided",
+           randomisation = FALSE)
+
+```
+
+
+```{r Monte Carlo Simulation of Morans I}
+
+## Run the test multiple times to compare our observed statistic compared to a random sampling of values across the dataset. 
+
+## Once done, we look at the rank of the observed version of Moran’s I against those obtained from random resampling. If we are either at the high or low end of all these random realizations, it is highly likely that the observed distribution is significantly autocorrelated. As we are using a rank, we cannot use a two-sided test, but must specify if we believe the autocorrelation to be positive (‘greater’) or negative (‘less’). The number of simulations to run is given by the parameter nsim. Increasing this, will increase the precision of the p-value obtained (but take longer to run):
+
+
+moran.mc(boston$logCMEDV,
+         listw = boston.listw,
+         alternative = "greater",
+         nsim = 999)
+
+
+```
+
+- In this case, our observed value is the highest value after running the test 999 times. Based on this and the p-value we reject the null hypothesis that there is no autocorrelation. 
+
+```{r Moran Plot}
+
+## Now make the Moran scatterplot. This shows the relationship between the value of any given area and its neighbors. The slope of the fitted line is the value of Moran’s I:
+
+moran.plot(boston$logCMEDV,
+           boston.listw,
+           labels = as.character(boston$ID),
+           xlab = "Log Median Value",
+           ylab = "Lagged Log Median Value")
+
+
+
+```
+
+
+## **Local Moran's _I_**
+
+```{r Local Morans I}
+
+## We will now calculate the local Moran’s I to examine the spatial pattern of autocorrelation. This returns a statistic (and z-score) for each area considered.
+
+lm1 = localmoran(boston$logCMEDV,
+                 listw = boston.listw,
+                 alternative = "two.sided")
+
+
+## View the header of the local moran's value by polygon
+head(lm1)
+
+```
+
+
+```{r Local Morans I Visualization - z score}
+
+## Extract the z scores in the fourth column
+
+boston$zscore = lm1[ , 4]
+
+## Extract the z scores in the fifth column
+
+boston$pval = lm1[ , 5]
+
+## Visualize them
+
+## Note: style	
+## method to process the color scale when col is a numeric variable. Discrete gradient options are "cat", "fixed", "sd", "equal", "pretty", "quantile", "kmeans", "hclust", "bclust", "fisher", "jenks", "dpih", "headtails", and "log10_pretty"
+
+tm_shape(boston) +
+  tm_fill("zscore",
+          palette = "Blues",
+          style = "jenks",
+          n = 6) +
+  tm_borders() +
+  tm_layout(main.title = "Local Morans I (Z-Scores)",
+            legend.outside = TRUE,
+            legend.outside.position = "left")
+
+```
+
+
+```{r Local Morans I Visualization - pvalue}
+
+## Turn the pvalue into a binary vector to separate statistically significant values (>0.05) and those that are not.
+
+boston$pval.bin = as.factor(ifelse(boston$pval < 0.05, "Signifcant", "Not Significant"))
+
+
+
+tm_shape(boston) +
+  tm_fill("pval.bin") +
+  tm_borders() +
+  tm_layout(main.title = "Local Morans I (P-values)",
+            legend.position = c("left", "bottom"))
+
+```
+
+
+```{r Getis Ord Statistic, message = FALSE}
+
+
+## Produce weights to include the weight of a location with itself (include.self) syntax.
+
+boston.listwGs = nb2listw(include.self(boston.nb), style = "B")
+
+## Caluclate the statistc - localG()
+
+boston$lG = as.numeric(localG(boston$logCMEDV, boston.listwGs))
+
+## Plot the results
+
+tm_shape(boston) +
+  tm_fill("lG",
+          palette = "-RdYlBu",
+          style = "jenks",
+          n = 6,
+          title = "Getis-Ord Score") +
+  tm_borders() +
+  tm_layout(main.title = "Local Getis-Ord (Z-Scores)",
+            main.title.size = 1,
+            legend.outside = TRUE,
+            legend.outside.position = "left")
+
+```
+
+- Observe that we have spatial structure with clusters of low prices in the center and higher prices in the suburbs.
+
+
+```{r Plotting Hot and Cold Spots}
+
+## Significant factor build
+
+## Question on the if else statment. Number bound choice??
+
+boston$lG.sig = ifelse(boston$lG < -1.96, -1,
+                       ifelse(boston$lG > 1.96, 1, 0))
+
+boston$lG.sig = factor(boston$lG.sig, labels = c("Cold", "Not Significant", "Hot"))
+
+
+## Visualization
+
+tm_shape(boston) + 
+  tm_fill("lG.sig", 
+          palette = "-RdYlBu", 
+          style = "jenks",
+          n = 6) +
+  tm_borders() +
+  tm_layout(main.title = "Local Getis-Ord G(*) hot/cold spots",
+            main.title.size = 1,
+            legend.position = c("left", "bottom"))
+
+
+```
+
+
+# **Spatial Regression Models**
+
+```{r Columbus Data Read}
+
+## Read the Data
+
+col = st_read("../datafiles/columbus/columbus.shp", quiet = TRUE)
+
+## Check CRS
+
+st_crs(col)
+
+## Set CRS
+
+st_crs(col) = 4326
+
+## Skewed (to the left according to the histogram...error in the lab instructions?)
+## Log transformation
+
+col$lINC = log(col$INC)
+
+col$lHOVAL = log(col$HOVAL)
+
+
+## Visualize the Crime Rate
+
+
+tm_shape(col) +
+  tm_fill("CRIME",
+          palette = "-RdYlGn") +
+  tm_borders(col = "gray")
+
+```
+
+
+## **Build the Spatial Weight Matrix**
+
+```{r Columbus Spatial Weight Matrix}
+
+## Get the Geometry
+
+col.geom = st_geometry(col)
+
+## Get the centroids
+
+col.coords = st_centroid(col.geom)
+
+## Build the neighborhood structure (Queens Case)
+
+col.nbq = poly2nb(col, queen = TRUE)
+
+
+## Convert to a Spatial Weight Matrix
+
+col.listw = nb2listw(col.nbq)
+
+
+## Plot the Structure
+
+plot(col.geom, 
+     main = "Neighborhood Structure (Queen's)",
+     reset = FALSE)
+plot(col.nbq, col.coords, 
+     add = TRUE, 
+     col = 1, 
+     lwd = 1.5)
+
+```
+
+
+## **Checking For Autocorrelation for Crime**
+
+```{r Global Morans - Crime}
+
+## Run the Global Moran's I test to look for auto correlation. Randomization assumtion is set to TRUE as we don't know about any larger spatial trends in the data. Two sided meaning postive or negative autocorrelation. 
+
+moran.test(col$CRIME,
+           listw = col.listw,
+           alternative = "two.sided",
+           randomisation = TRUE)
+
+
+## Monte Carlo Check
+
+moran.mc(col$CRIME,
+         listw = col.listw,
+         alternative = "greater",
+         nsim = 999)
+
+```
+
+- Suggests a strong level of autocorrelation
+
+
+
+```{r Local Morans - Crime}
+
+
+col.lm1 = localmoran(col$CRIME,
+                 listw = col.listw,
+                 alternative = "two.sided")
+
+
+## View the header of the local moran's value by polygon
+head(col.lm1)
+
+
+
+```
+
+```{r Plotting Local Morans - Z Score - Columbus }
+
+## Extract the z scores in the fourth column
+
+col$zscore = col.lm1[ , 4]
+
+## Extract the z scores in the fifth column
+
+col$pval = col.lm1[ , 5]
+
+## Visualize them
+
+## Note: style	
+## method to process the color scale when col is a numeric variable. Discrete gradient options are "cat", "fixed", "sd", "equal", "pretty", "quantile", "kmeans", "hclust", "bclust", "fisher", "jenks", "dpih", "headtails", and "log10_pretty"
+
+tm_shape(col) +
+  tm_fill("zscore",
+          palette = "Blues",
+          style = "jenks",
+          n = 6) +
+  tm_borders() +
+  tm_layout(main.title = " Columbus - Local Morans I (Z-Scores)",
+            legend.outside = TRUE,
+            legend.outside.position = "left")
+
+
+```
+
+
+```{r Local Morans I Visualization - pvalue - Columbus}
+
+## Turn the pvalue into a binary vector to separate statistically significant values (>0.05) and those that are not.
+
+col$pval.bin = as.factor(ifelse(col$pval < 0.05, "Signifcant", "Not Significant"))
+
+
+tm_shape(col) +
+  tm_fill("pval.bin",
+          title = "p-value Significance") +
+  tm_borders() +
+  tm_layout(main.title = "Columbus - Local Morans I (P-values)",
+            legend.position = c("left", "top"))
+
+```
+
+- The local test also provides evidence for significance
+
+## **Spatial Regression**
+
+```{r OLS Regression}
+
+## Basic linear model - Crime as a function of the log transformed income and home value
+
+col.fit1 = lm(CRIME ~ lINC + lHOVAL, data = col)
+
+summary(col.fit1)
+
+
+```
+
+- This model performs well, but we know based on the map and Moran's test that there is some level of autocorrelation
+
+```{r Residual Test for Autocorrelation}
+
+## Use morans I Monte Carlo simulations
+
+moran.mc(residuals(col.fit1),
+         nsim = 999,
+         listw = col.listw,
+         alternative = "greater")
+
+```
+
+- Statistically significant that there is spatial autocorrelation among our residuals (errors)
+
+```{r Lagrange Multiplier Test}
+
+## The Lagrange multiplier test is used to assess whether the autocorrelation is in the values of the dependent variable or in its errors, and helps in the choice of which spatial regression model to use. 
+
+## Build the Test
+## LMerr is testing the errors
+## LMlag is testing the dependent variable and a "lag" effect (spillover)
+
+lmt = lm.LMtests(col.fit1, col.listw, test = c("LMerr", "LMlag"))
+
+summary(lmt)
+
+```
+
+
+- Indicates that there is spatial autocorrelation among both the errors and dependent variable, however it is stronger in the dependent variable.
+
+
+```{r Robust Test}
+
+## Use the robust test to decide which of two is the more likely source for autocorrelation
+
+lmt_robust = lm.LMtests(col.fit1, col.listw, test = c("RLMerr", "RLMlag"))
+
+summary(lmt_robust)
+
+
+```
+
+
+## **Spatial Lag Model**
+
+```{r Spatial Lag Model}
+
+## Build the model using the lagsarlm() function
+
+col.fit2 = lagsarlm(CRIME ~ lINC + lHOVAL,
+                    data = col,
+                    listw = col.listw)
+
+summary(col.fit2)
+
+
+```
+
+**Note:**
+- Estimates of the coefficients associated with the independent variables
+- The coefficient rho value, showing the strength and significance of the autoregressive spatial component
+- The LM test on residuals to look for remaining autocorrelation
+- The AIC and log-likelihood giving an estimate of the goodness-of-fit of the model
+
+
+```{r Residual Test for the Lag Model}
+
+moran.mc(residuals(col.fit2),
+         nsim = 999,
+         listw = col.listw,
+         alternative = "greater")
+
+```
+
+- This model does well at taking into account the spatial autocorrelation
+
+
+## **Spatial Error Model**
+
+```{r Spatial Error Model}
+
+
+col.fit3 = errorsarlm(CRIME ~ lINC + lHOVAL,
+                    data = col,
+                    listw = col.listw)
+
+summary(col.fit3)
+
+
+```
+
+- In the output of the function, note the value of lambda, the autoregressive coefficient representing the strength of autocorrelation in the residuals of a linear model.
+
+
+## **Spatial Durbin Lag Model**
+
+```{r Durbin Model}
+
+## Correlation between the dependent variable and the neighboring independent variables
+
+## This also uses the lagsarlm() function, but with the parameter type set to ‘mixed’, to specify a Spatial Durbin lag model:
+
+col.fit4 = lagsarlm(CRIME ~ lINC + lHOVAL,
+                    data = col,
+                    listw = col.listw,
+                    type = "mixed")
+
+summary(col.fit4)
+
+
+
+```
+
+- Not significant with the lagged versions. There is a low Rho value at the p-value is above the critical threshold. 
+
+
+```{r AIC Comparison}
+
+aic.tbl = AIC(col.fit2, col.fit3, col.fit4)
+
+rownames(aic.tbl) = c("Lag Model", "Error Model", "Durbin Model")
+
+aic.tbl %>%
+  kbl(caption = "AIC Comparison") %>%
+  kable_classic_2(full_width = F, html_font = "arial")
+  
+
+```
+
+
+# **Exercise**
+
+## **1.1 US Car Data Neighbor Structure**
+
+```{r}
+
+## Read the data
+
+cars = st_read("../datafiles/usedcars/usa48_usedcars.shp", 
+                 quiet = TRUE)
+
+## Check
+
+st_crs(cars)
+
+## Check if the geometry is valid
+
+st_is_valid(cars)
+
+## Make the geometry valid
+
+cars2 = st_make_valid(cars)
+
+## Check again
+
+st_is_valid(cars2)
+
+## Set CRS
+
+# Note Converting to WGS84 on the original data - cars - produces a polygon with overlapping lines which produces an error when building the centroids 
+
+st_crs(cars2) = 4326
+
+## Alternative code to deal with invalid geometry
+
+##sf_use_s2(FALSE)
+##cars <- st_read("../datafiles/usedcars/usa48_usedcars.shp", crs = 4326)
+##tm_shape(cars) + tm_fill("price_1960")
+
+## Extract the geometry
+cars.geom = st_geometry(cars)
+
+## Extract the centroids
+
+cars.coord = st_centroid(cars.geom)
+
+## Build the neighborhood structure
+
+cars.nb = poly2nb(cars, queen = TRUE)
+
+## Visualize the Structure
+
+plot(cars.geom,
+     reset = FALSE,
+     border = "black")
+plot(cars.nb, cars.coord,
+     col = "red",
+     cex = 0.5,
+     add = TRUE)
+
+```
+
+Explanation:
+
+- I chose the queen's method for constructing my neighbor function to account for states that are in close proximity, yet only share a point along their border, for example, the four corners region - Utah, Colorado, New Mexico, and Arizona. Utilizing the queen's method allows us to account for Colorado and Arizona being neighbors along with New Mexico and Utah. This approach is ideal as the region shares several characteristics with each other. 
+
+
+## **1.2 Spatial Weight Matrix**
+
+```{r}
+
+## Utilizing a weighted approach to building our matrix
+
+cars.listw = nb2listw(cars.nb, style = 'W')
+
+## Summary of our weight matrix
+
+summary(cars.listw)
+
+```
+
+
+
+## **1.3 Moran's Test for Autocorrelation**
+
+```{r}
+
+## Moran's Monte Carlo
+
+cars.mc = 
+  moran.mc(cars$price_1960,
+         listw = cars.listw,
+         alternative = "greater",
+         nsim = 999)
+
+cars.mc
+```
+
+Interpretation:
+
+- Based on the high Moran's _I_ statistic of `r cars.mc$statistic`, its observed rank of `r cars.mc$parameter` , and a _p_-value of `r cars.mc$p.value` we can reject the null hypothesis and accept the alternative hypothesis that there is spatial autocorrelation for used car prices in the United States.
+
+
+## **1.4 Simple Linear Model**
+
+```{r}
+
+car.lm1 = lm(price_1960 ~ tax_charge, data = cars)
+
+car.lm1.sum = summary(car.lm1)
+
+car.lm1.sum
+
+
+```
+
+
+```{r Residual - Morans Monte Carlo}
+
+car.lm1.mc = 
+  moran.mc(residuals(car.lm1),
+         nsim = 999,
+         listw = cars.listw,
+         alternative = "greater")
+
+car.lm1.mc
+```
+
+Coefficients:
+
+- The intercept is `r coef(car.lm1)[1]` and the slope is `r coef(car.lm1)[2]`. 
+
+- The $r^2$ is `r car.lm1.sum$adj.r.squared`. 
+
+- The _p_-value is `r car.lm1.sum$coefficients[2,4]`.
+
+
+Residual Moran's Monte Carlo:
+
+- The Moran's _I_ statistic is `r car.lm1.mc$statistic` with an observed rank of `r car.lm1.mc$parameter` and _p_-value of `r car.lm1.mc$p.value`. Given these values we reject the null hypothesis and accept the alternative hypothesis that there is spatial autocorrelation among the residuals. 
+
+
+
+## **1.5 Lagrange Multiplier Test**
+
+```{r Lagrange Multiplier Test - Cars}
+
+## Non-robust test
+
+cars.lmt = lm.LMtests(car.lm1, listw = cars.listw, test = c("LMerr", "LMlag"))
+
+cars.lmt.sum = summary(cars.lmt)
+
+cars.lmt.sum
+
+```
+
+
+```{r Robust test - Cars}
+
+## Robust Test
+## RLM syntax for the test
+
+cars.lmt.robust = lm.LMtests(car.lm1, listw = cars.listw, test = c("RLMerr", "RLMlag"))
+
+cars.lmt.robust.sum = summary(cars.lmt.robust)
+
+cars.lmt.robust.sum
+```
+
+
+Explanation:
+
+- The non-robust Lagrange multiplier test results in significant values for both the error and lag models. The statistic and _p_-value for the error model are `r cars.lmt.sum$results[1,1]` and `r cars.lmt.sum$results[1,3]` respectively. The statistic and _p_-value for the lag model are `r cars.lmt.sum$results[2,1]` and `r cars.lmt.sum$results[2,3]` respectively.
+
+- The robust test returns a significant _p_-value, `r cars.lmt.robust.sum$results[2,3]`, for the lag model. As a result, we will build a **spatial lag model** for this data set.  
+
+
+## **1.6 Spatial Model Build**
+
+```{r Spatial Lag Model - Cars}
+
+## Model Build
+cars.lagmod = lagsarlm(price_1960 ~ tax_charge, 
+                       data = cars,
+                       listw = cars.listw)
+
+## Summary Variable
+cars.lagmod.sum = summary(cars.lagmod)
+
+## Output
+cars.lagmod.sum
+
+
+```
+
+Explanation: 
+
+- The intercept for this model is `r cars.lagmod.sum$Coef[1,1]` with a _p_-value of `r cars.lagmod.sum$Coef[1,4]`.
+
+- The slope for this model is `r cars.lagmod.sum$Coef[2,1]` with a _p_-value of `r cars.lagmod.sum$Coef[2,4]`
+
+- The value of Rho for this model is `r cars.lagmod.sum$rho` which indicates there is a strong spatial component for our dependent variable.
+
+- The AIC for this model is 487.65. This indicates that the spatial lag model is better than the simple linear model which has an AIC of `r cars.lagmod.sum$AIC_lm.model`. 
+
+
+## **1.7 Spatial Lag Model - Residuals Autocorrelation Test**
+
+```{r Morans Monte Carlo for Residuals - Cars}
+
+cars.resid.moran =
+  moran.mc(residuals(cars.lagmod),
+         listw = cars.listw,
+         alternative = "greater",
+         nsim = 999)
+
+cars.resid.moran
+```
+
+
+Explanation:
+
+- For the model's residuals, the Moran's _I_ statistic is `r cars.resid.moran$statistic`, with an observed rank of `r cars.resid.moran$parameter` and _p_-value of `r cars.resid.moran$p.value`. Based on these values, we accept the null hypothesis that there is no spatial autocorrelation among this model's residuals. Our spatial lag model adequately addresses the spatial component of our data.   
+
+
+## **1.8 Coefficient Interpretation**
+
+Explanation: 
+
+- The slope for this model is `r cars.lagmod.sum$Coef[2,1]` with a _p_-value of `r cars.lagmod.sum$Coef[2,4]` which is not statistically significant. This is likely due to the nature of used cars. They are typically bought and sold within the same city and state which minimizes the delivery aspect of used car prices. Additionally, tax rates and delivery charges vary by state which may not reflect the cost of living and, subsequently, the price of a used car. In many cases, the tax and delivery charge only represent a small percentage (approximately 5% - 15%) of the overall cost and is not a great predictor of overall price. 
+
+```{r Visualization of Cars2}
+
+tm_shape(cars2) +
+  tm_fill(col = "price_1960",
+          palette = "GnBu",
+          title = "Price ($)") +
+  tm_borders(col = "gray") +
+  tm_layout(main.title = "Used Car Prices in the US - 1960",
+            main.title.position = "center")
+
+```
+
+
+```{r Visualization of Cars2 - Tax}
+
+tm_shape(cars2) +
+  tm_fill(col = "tax_charge",
+          palette = "Reds",
+          title = "Charges ($)") +
+  tm_borders(col = "gray") +
+  tm_layout(main.title = "Tax and Delivery Charge in the US - 1960",
+            main.title.position = "center")
+
+```
+
+
+

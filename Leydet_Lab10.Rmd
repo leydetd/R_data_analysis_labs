@@ -1,0 +1,751 @@
+---
+title: "Leydet Lab 10"
+author: "David Leydet"
+date: "2022-11-03"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: yeti
+---
+
+**Spatial Regression II**
+
+```{r Initial Setup, message = FALSE}
+
+library(RColorBrewer) #color palettes
+library(sf) #simple features for spatial data
+library(spdep) #spatial regression
+library(spatialreg) #spatial regression
+library(spgwr) #geographically weighted regression
+library(tmap) #mapping package
+library(kableExtra) #table modification
+library(dbscan) #density based clustering
+library(ggplot2) #plotting results
+library(ggpubr) ##Arranging plots
+library(Hmisc) ##describe function
+library(tidyverse) ##data formatting package
+
+## Set working directory
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab10")
+
+```
+
+
+# **Columbus Crime Dataset**
+
+## **Reading the Dataset**
+
+```{r Reading the Data}
+
+##Read in the data
+
+col = st_read("../datafiles/columbus/columbus.shp",
+              quiet = TRUE)
+
+##Log transform the covariates
+
+col$lINC = log(col$INC)
+
+col$lHOVAL = log(col$HOVAL)
+
+
+```
+
+
+## **Building the Spatial Weight Matrix**
+
+```{r Neighborhood Structure}
+
+##Neighborhood Structure
+col.nbq = poly2nb(col, queen = TRUE)
+
+col.nbq
+
+```
+
+
+```{r Weight Matrix}
+
+##Weight Matrix using the neighborhood structure in the previous step
+col.listw = nb2listw(col.nbq)
+
+
+```
+
+
+```{r Neighborhood Structure Visualization, warning = FALSE}
+
+##Extract the Columbus Geometry
+col.geom = st_geometry(col)
+
+##Build the centroid geometry
+coords = st_coordinates(st_centroid(col))
+
+##Visualize 
+
+plot(col.geom,
+     col = "lightgray",
+     border = "white",
+     reset = FALSE)
+plot(col.nbq, coords,
+     add = TRUE,
+     col = 3,
+     lwd = 2)
+  
+  
+
+```
+
+```{r ggplot test, echo = FALSE, eval = FALSE}
+
+
+ggplot(col.geom) +
+  geom_sf(col = "gray") +
+  theme_bw()
+
+
+
+```
+
+# **Spatial Filtering**
+
+From Simon's Lab:
+
+"Spatial Filtering is carried out as a series of steps:
+
+- Start by building the simple OLS regression model between the dependent and independent variables. Test for spatial autocorrelation.
+
+- Use the SpatialFiltering() function to run the stepwise procedure to select which Moran eigenvectors should be used to filter the data. The selected eigenvector at each step is the one that reduces the Moran’s I values for the model the most (**i.e. filters the most spatial autocorrelation**)
+
+- Rebuild the model including the selected set of Moran eigenvectors
+
+## **Step 1: OLS Build**
+
+```{r OLS Build}
+
+##Step 1: Build OLS model
+
+lm.ols = lm(CRIME ~ lHOVAL + lINC,
+            data = col)
+
+summary(lm.ols)
+
+```
+
+
+```{r Morans Test}
+
+##Run the Morans I to test for spatial autocorrelation
+
+moran.mc(residuals(lm.ols),
+          listw = col.listw,
+          nsim = 999,
+          alternative = "greater")
+
+## Results indicate there is spatial autocorrelation
+```
+
+
+## **Step 2: Filter Build**
+
+
+```{r Filter Build}
+
+## Step 2: Build the spatial filter to step through various moran's eigenvectors to figure out which ones should be used to filter the data. 
+
+## Use the following parameters:
+
+##The neighborhood structure (not the spatial weight matrix)
+
+##The weights to be used (style).We set this here to C which is a global standardization. To see other options, look at the help for nb2listw().
+
+
+##The stopping rule (alpha). Moran eigenvectors are selected until the p-value of the stepwise Moran’s I test exceed this value
+
+
+##ExactEV = TRUE - calculates exact values for Moran’s I expected value and variance. If this is set to FALSE, the values will be calculated using a fast approximation. This can greatly reduce the amount of time required, especially with large datasets.
+
+sf.err = SpatialFiltering(lm.ols,
+                          nb = col.nbq,
+                          style = "C",
+                          alpha = 0.25,
+                          ExactEV = TRUE,
+                          data = col)
+
+sf.err
+
+```
+
+
+The output table reads as follows:
+
+- Step: the step number
+
+- SelEvec/Eval: the eigenvalue of the selected eigenvector
+
+- MinMi: Moran’s I for residuals with that eigenvector (and previous eigenvectors) included as a filter
+
+- ZMinMi: Moran’s I for residuals transformed to z-score
+
+- Pr(ZI): the p-value for the z-score
+
+- R2: the R2 value of the model with eigenvectors included
+
+- gamma: regression coefficient of selected eigenvector in fit
+
+
+```{r Visualization of Morans Eigenvectors}
+
+## Extract eigenvector 4 to plot it
+
+col$ME4 = sf.err$dataset[ , "vec4"]
+
+## Plot it
+
+tm_shape(col) +
+  tm_fill(col = "ME4", palette = "BuPu") +
+  tm_borders() +
+  tm_layout(main.title = "Moran Eigenvector 4",
+            main.title.size = 1.2)
+
+
+```
+
+
+## **Step 3: Re-build the Model**
+
+```{r Fitted Model Build}
+
+## Extract the chosen eigenvectors from the filter (in this case vec 3 and 4) to use for our new model 
+E.sel = fitted(sf.err)
+
+## Build the new model
+lm.sf = lm(CRIME ~ lHOVAL + lINC + E.sel,
+            data = col)
+
+summary(lm.sf)
+
+```
+
+
+```{r Morans I Filtered Model}
+
+##Test the filtered models residuals for autocorrelation
+
+moran.test(residuals(lm.sf),
+      listw = col.listw)
+
+##This model accounts for the spatial autocorrelation well
+
+```
+
+
+```{r Model ANOVA}
+
+##Compare the models using an ANOVA
+
+anova(lm.ols, lm.sf)
+
+
+##We reject the null hypothesis that the simple linear model is better
+```
+
+
+# **Geographically Weighted Regression**
+
+```{r US Poverty Data Read}
+
+##Read in the data
+
+south.sf = st_read("../datafiles/south/south00.shp", 
+                   quiet = TRUE)
+
+##The geometry is valid. Correct it with st_make_valid
+south.sf = st_make_valid(south.sf)
+
+##Mapping poverty
+
+tm_shape(south.sf) +
+  tm_fill("PPOV", palette = "BrBG") +
+  tm_layout(main.title = "Southeastern US Poverty Rates")
+            #legend.outside = TRUE,
+            #legend.outside.position = "left")
+
+
+```
+
+
+```{r Neighorhood Structre - Poverty}
+
+##Queens Structure
+south_nb = poly2nb(south.sf, queen = TRUE)
+
+## "W" is for row standardized weights
+south_listw = nb2listw(south_nb, style = "W")
+
+## Moran's I for poverty
+
+moran.test(south.sf$PPOV,
+         listw = south_listw)
+
+## Autocorrelation present!
+
+```
+
+
+```{r OLS Model Build - Poverty}
+
+## Why are we using the square root? To normalize the data?
+## The square root of Poverty as a function of the following:
+
+## PFHH: Percent female head of household
+## PUNEM: Percent unemployed
+## PBLK: Percent Black in population
+## P65UP: Percent over 65 years old
+## METRO: Metropolitan area (binary)
+## PHSPLUS: Percent with education beyond high school
+
+fit1 = lm(SQRTPPOV ~ PFHH + PUNEM + PBLK + P65UP + METRO + PHSPLUS, 
+           data = south.sf)
+
+summary(fit1)
+
+
+```
+```{r Residuals Morans - Poverty}
+
+moran.test(residuals(fit1), 
+           listw = south_listw)
+
+## Spatial Autocorrelation Present!
+
+```
+
+```{r Residuals Visualization - Poverty}
+
+## Extract the residuals as a new column in the south.sf simple feature
+south.sf$lm.res = residuals(fit1)
+
+
+## Visualize them
+
+tm_shape(south.sf) +
+  tm_fill("lm.res", palette = "GnBu") +
+  tm_layout(main.title = "OLS Model Residuals (fit1)")
+            #legend.outside = TRUE,
+            #legend.outside.position = "left")
+
+
+```
+
+
+```{r Geographically Weighted Regression Build - Poverty, warning=FALSE}
+
+## Two (2) steps using the spgwr pacakge
+
+## Step 1 - Assess the best window size. You can use two approaches:
+
+## Fixed size: each window will have the same bandwidth or size, so models in data sparse areas will have fewer observations
+
+## Adaptive: rather than setting a single window size, the window for each model is chosen to capture the same number of observations. Adaptive is typically prefered
+
+## Step 1.1 - Extract centroids to use in the distance calculations
+
+sf.coords = st_coordinates(st_centroid(south.sf))
+
+## Step 1.2 - Find the value of "q": the proportion of points in each window
+## Adative approach (adapt = TRUE)
+## Verbosee - reports progress as the code runs
+## See ?gwr.sel for other elements
+
+south.bw = gwr.sel(SQRTPPOV ~ PFHH + PUNEM + PBLK + P65UP + METRO + PHSPLUS,
+                    data = south.sf, 
+                    coords = sf.coords, 
+                    adapt = TRUE, 
+                    gweight = gwr.Gauss,
+                    method = "cv", 
+                    verbose = TRUE)
+
+
+```
+
+```{r q - Poverty}
+
+south.bw
+
+```
+
+
+```{r Estimate the Number Of Observations per Window}
+
+dim(south.sf)[1] * south.bw
+
+```
+
+
+```{r GWR Model Build - Poverty}
+
+## Step 2 - Build the model using the output of q from the previous step using the adapt = south.bw syntax
+
+## Note - this is building 1387 local models!!
+
+south.gwr = gwr(SQRTPPOV ~ PFHH + PUNEM + PBLK + P65UP + METRO + PHSPLUS,
+                 data = south.sf, 
+                 coords = sf.coords, 
+                 adapt = south.bw, 
+                 gweight = gwr.Gauss, 
+                 hatmatrix = TRUE)
+
+south.gwr
+
+```
+
+**Note:**
+
+The output of the model gives summary statistics about the **range of coefficients across all models built (n=1387, the number of counties)**. In the model diagnostics, you will find an AIC value, which may be used in model comparison, and an **R2 value, which should be treated with some caution.**
+
+The output from the gwr() function includes a large list object with a lot of information in it. One object in this list is a SpatialPointsDataFrame. This is the older form of spatial object in R, and contains various information about the local models. We’ll now use this to plot out some of the model results. It is possible to convert these to an sf object, but it is easier to simply assign new columns in the existing south.sf object with the results we want to visualize.
+
+
+```{r GWR Visualization - Poverty}
+
+##Explore the gwr object
+
+class(south.gwr$SDF)
+
+##str(south.gwr) was useful as well
+
+##Extract the local r^2 values
+
+south.sf$localr2 = south.gwr$SDF$localR2
+
+##Visualize it
+
+tm_shape(south.sf) +
+  tm_fill("localr2", palette = "RdPu") +
+  tm_layout(main.title = "GWR Local r2 Output")
+
+```
+
+- Areas with low R2 values may indicate model misspecification - missing independent variables (e.g. West Texas).
+
+```{r Over 65 Population Coefficient, message=FALSE}
+
+## Extract the coefficient
+south.sf$beta_P65UP = south.gwr$SDF$P65UP
+
+##Visualization
+tm_shape(south.sf) + 
+  tm_fill("beta_P65UP", palette = "PRGn", n = 9) +
+  tm_layout(main.title = "Coefficient for P65UP")
+
+##How do we do this for p values???
+
+```
+
+# **Spatial Hierarchical Models**
+
+**OPTIONAL SECTION**
+
+
+# **Exercise** 
+
+
+## **1.1 Map of House Prices**
+
+```{r Boston Data Read and Map}
+
+## Read in the data
+
+bos = st_read("../datafiles/boston.tr/boston.shp",
+              quiet = TRUE)
+
+
+## Log transform the CMEDV
+
+bos$logCMEDV = log(bos$CMEDV)
+
+
+
+cmedv.hist = ggplot(data = bos, aes(x = CMEDV)) +
+  geom_histogram(binwidth = 5) +
+  labs(title = "CMEDV Histogram") +
+  theme_bw()
+
+
+logcmedv.hist = ggplot(data = bos, aes(x = logCMEDV)) +
+  geom_histogram(binwidth = 0.2) +
+  labs(title = "Log CMEDV Histogram") +
+  theme_bw()
+
+
+ggarrange(cmedv.hist, logcmedv.hist, ncol = 2, nrow = 1)
+
+```
+
+```{r Boston Map}
+
+## Check the geometry
+
+# st_is_valid(bos)
+
+## Valid
+
+tm_shape(bos) +
+  tm_fill(col = "CMEDV", palette = "GnBu", title = "House Value (USD 1000)") +
+  tm_borders(col = "gray90", lwd = 0.5) +
+   tm_style("cobalt") +
+  tm_layout(main.title = "Greater Boston Area Median House Value",
+            main.title.size = 1) +
+  tm_compass(type = "arrow",
+             position = c("left", "bottom")) +
+  tm_scale_bar(position = c("center", "bottom"),
+               color.dark = "gray50")
+ 
+
+```
+
+
+## **1.2 Basic Liniear Regression**
+
+````{r Basic Linear Model - Boston}
+
+## Variable Choices
+
+## CRIM - per capita crime - need to transform
+## RM - average numbers of rooms per dwelling - good
+## AGE - proportions of owner-occupied units built prior to 1940 - maybe?
+## DIS - weighted distances to five Boston employment centers - transform
+## TAX - property tax - transforming doesn't fix the distribution
+## LSTAT - Percent lower socioeconomic status -transform
+
+## log transform skewed variables
+bos$logCRIM = log(bos$CRIM)
+#bos$logAGE = log(bos$AGE)
+bos$logDIS = log(bos$DIS)
+bos$logLSTAT = log(bos$LSTAT)
+
+## Question on this - Does transforming independent variables minimize the behavior/weight of outliers? 
+
+## bos.lm0 = lm(logCMEDV ~ CRIM + RM + AGE + DIS + TAX + LSTAT,
+            #data = bos)
+
+bos.lm = lm(logCMEDV ~ logCRIM + RM + AGE + logDIS + TAX + logLSTAT,
+            data = bos)
+
+summary(bos.lm)
+
+```
+
+
+## **1.3 Spatial Autocorrelation Test (Residuals)**
+
+```{r Residual Test for Autocorrelation - Boston, warning=FALSE}
+
+## Build the neighborhood structure
+
+bos.nbq = poly2nb(bos, queen = TRUE)
+
+## Build the weight matrix
+
+bos.listw = nb2listw(bos.nbq)
+
+
+## Extract the centroids and geometry
+
+bos.coords = st_coordinates(st_centroid(bos))
+bos.geom = st_geometry(bos)
+
+# Visualize the struture
+
+plot(bos.geom,
+     col = "lightgray",
+     border = "white",
+     reset = FALSE)
+plot(bos.nbq, bos.coords,
+     add = TRUE,
+     col = 3,
+     lwd = 2)
+  
+```
+
+
+```{r Residual Test for Autocorrelation2 - Boston}
+
+
+bos.mor.mc = moran.mc(residuals(bos.lm),
+          listw = bos.listw,
+          nsim = 999,
+          alternative = "greater")
+
+bos.mor.mc
+
+```
+
+
+## **1.4 Spatial Regression Model**
+
+
+```{r Lagrange Multiplier Test - Boston}
+
+## Non-robust test
+
+bos.lmt = lm.LMtests(bos.lm, listw = bos.listw, test = c("LMerr", "LMlag"))
+
+bos.lmt.sum = summary(bos.lmt)
+
+bos.lmt.sum
+
+```
+
+
+```{r Robust test - Boston}
+
+## Robust Test
+## RLM syntax for the test
+
+bos.lmt.robust = lm.LMtests(bos.lm, listw = bos.listw, test = c("RLMerr", "RLMlag"))
+
+bos.lmt.robust.sum = summary(bos.lmt.robust)
+
+bos.lmt.robust.sum
+```
+
+
+**Model Choice and Explanation**
+
+- The results of the Moran's _I_ test - a large statistic (`r bos.mor.mc$statistic`), observed rank (`r bos.mor.mc$parameter`), and statistically significant _p_-value (`r bos.mor.mc$p.value`) causes us to conclude that there is significant spatial autocorrelation among our residuals. 
+
+- The results of the Lagrange Multiplier robust test indicate that that the spatial error is the more important cause of spatial autocorrelation (Statistic - `r bos.lmt.robust.sum$results[1,1]` and _p_-value - `r bos.lmt.robust.sum$results[1,3]`), although the spatial lag is also quite significant as well (Statistic - `r bos.lmt.robust.sum$results[2,1]` and _p_-value - `r bos.lmt.robust.sum$results[2,3]`). As a result, I chose to start with a **spatial error model** to account for the spatial autocorrelation. 
+
+
+
+```{r Spatial Model Build - Boston}
+
+##Spatial Error Model
+
+bos.error.lm = errorsarlm(logCMEDV ~ logCRIM + RM + AGE + logDIS + TAX + logLSTAT,
+            data = bos,
+            listw = bos.listw)
+
+bos.error.lm.sum = summary(bos.error.lm)
+
+bos.error.lm.sum 
+```
+
+```{r Error Model Residuals - Visualization}
+
+bos$err.resid = residuals(bos.error.lm)
+
+tm_shape(bos) +
+  tm_fill("err.resid", palette = "YlOrRd" ) +
+  tm_style(style = "cobalt") +
+  tm_borders(col = "lightgray") +
+  tm_layout(main.title = "Error Model Residuals")
+
+
+```
+
+```{r Residuals Plot}
+
+plot(residuals(bos.error.lm),
+     main = "Error Model Residuals Plot")
+abline(v = 90, col = "red")
+abline(v = 0, col = "red")
+
+## Slightly heteroskedastic in this region.
+
+```
+
+```{r Error Model Residuals Test - Boston}
+
+bos.error.lm.moran = moran.mc(residuals(bos.error.lm),
+                              listw = bos.listw,
+                              nsim = 999,
+                              alternative = "two.sided")
+
+bos.error.lm.moran
+
+```
+
+## **1.5 Model Goodness-of-Fit**
+
+```{r Goodness of Fit}
+
+
+bos.error.lm.sum 
+
+```
+
+
+**Goodness-Of-Fit Assessment**
+
+- Lambda for this model is `r bos.error.lm.sum$lambda` which is the autoregressive coefficient for this model. In this case, it represents a strong autocorrelation in the residuals of the linear model.
+
+- The _p_- value for this model is well below our critical threshold indicating this model is statistically significant. 
+
+- The AIC for this model is approximately -430 compared to an AIC of `r bos.error.lm.sum$AIC_lm.model`. This model is a significant improvement over the basic linear model. 
+
+- When mapping and plotting the residuals, it appears that this model does well in dealing with the spatial autocorrelation. The residuals map reveals generally a random pattern for this model's residuals. The residuals plot is slightly heteroskedastic between the 0 and 100 index indicating that this model did not completely address the autocorrelation issue. This could be for a variety of reasons - the model may be misspecified and is missing a key variable(s) for particular local areas. The general model may be missing a variable as well. (See figures above)
+
+- Overall, the model is a huge improvement over the basic ordinary least squares linear model.  
+
+
+## **1.6 Variables that Influence House Prices**
+
+**Variable Assessment**
+
+- The statistically significant variables that influence house value are:
+
++ Per Capita Crime (logCRIM): The logCRIM coefficient is `r coef(bos.error.lm)["logCRIM"]`. This is a negative relationship with house value as the log crime rate increases the log corrected median house value (logCMEDV) decreases. The _p_-value, is statistically significant, although it is just slightly below our critical threshold. The relatively small z-score, coupled with the _p_-value indicates this relationship, while statisitically significant, is not as strong as other variables.  
+
++ Average Number of Rooms (RM): The RM coefficient is `r coef(bos.error.lm)["RM"]`. This is a positive relationship with house value as the room size increases, it increases the logCMEDV. The z-score and _p_-value are both extremely significant which indicates this relationship strongly affects home value.
+
++ Property Tax (TAX): The TAX coefficient is `r coef(bos.error.lm)["TAX"]`. This is a negative relationship as the tax rate increases the logCMEDV decreases. The z-score and _p_-value are both statistically significant. Although it is significant, the coefficient and slope is extremely small which means we don't expect to see huge changes in house value as a result from property tax. 
+
++ Percentage of Lower Status Population (logLSTAT): The logLSTAT coefficient is `r coef(bos.error.lm)["logLSTAT"]`. This is a negative relationship as the logLSTAT increases, the logCMEDV decreases. The z-score and _p_-value are both extremely significant indicating a strong relationship between socioecononmic status and house value. 
+
+
+
+## **1.7 Model Assessment**
+
+
+**Overall Assessment**
+
+- The spatial error model has some shortcomings despite its statistically significant results. The model does well to account for spatial autocorrelation, however, there is some heteroskedasticity remaining in the residuals. There is model is likely misspecified and is missing other important covariates. It may be worth conducting a geographically weighted regression to explore the importance and spatial distribution of the independent variables. 
+
+- The Lagrange Multiplier robust test demonstrated that there is a significant spatial lag effect present within the data set as well. By choosing the spatial error model for our approach, we ignored spatially lagged terms which contributes to overestimating our coefficients and inaccurate _p_-values. Although our Moran's Monte Carlo test for the error model led us to accept the null hypothesis that there is no spatial autocorrelation, it may be worth building a spatial lag model to compare against the spatial error model. 
+
+- In conclusion, I hesitate to use the spatial error model to explain house value in Boston as we are likely missing covariates and are not accounting for spatial lag effects. If this were an enduring project, I would continue to explore the data using a geographically weighted regression, a spatial lag model, and potentially a SAC/SAR model. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,612 @@
+---
+title: "Leydet_Lab07_Multivariate Analysis"
+author: "David Leydet"
+date: "2022-10-06"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: yeti
+    self_contained: false
+---
+
+# **Practice - Distance Measures and Cluster Analysis**
+
+```{r, message = FALSE}
+
+##R setup with packages for this lab
+
+
+library(ggplot2)
+library(ggpubr)
+library(plotly)
+library(maps) #Displaying geographic data
+library(cluster) #Cluster analysis package
+library(fpc) #Flexible procedures for clustering
+library(fields) #For working with spatial data
+library(RColorBrewer) #Adding additional color palettes 
+
+setwd("~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab07")
+
+```
+
+## **Distance Measures**
+
+```{r}
+
+cars = read.csv("../datafiles/cars.tab.csv")
+
+cars.use = cars[ , -c(1,2)]
+cars.use = scale(cars.use)  ##standardizes to zero mean and unit variance and converts each observation to a number of standard deviations away from the mean.
+
+#What is an atomic vector?? The scaled data??
+
+par(mfrow = c(2,1))
+hist(cars[, "Horsepower"], main = "Horsepower: Original Scale")
+hist(cars.use[, "Horsepower"], main = "Horsepower: Standardized Scale")
+par(mfrow = c(2, 1))
+
+
+```
+
+```{r}
+##dist() function to explore the multivariate distances between different cars. 
+
+dist(cars.use[1:4, ], method = 'euclidean')
+dist(cars.use[1:4, ], method = 'manhattan')
+
+
+```
+
+```{r}
+
+cars.dist = dist(cars.use)
+cars.dist
+
+```
+
+## **Hierarchical Clustering**
+
+
+```{r fig.height = 7}
+##Use the distance matrix to perform hierarchical clustering for the cars dataset. Ward's method uses the distances between centroids of two clusters to assess similarity.
+
+cars.hclust = hclust(cars.dist, method = 'ward.D2')
+
+plot(cars.hclust,
+     labels = cars$Car,
+     main = 'Default from hclust')
+
+```
+
+```{r fig.height = 7}
+
+plot(cars.hclust, labels = cars$Car, main = 'Default from hclust')
+rect.hclust(cars.hclust, k = 3)
+
+```
+
+```{r}
+#Cutree function allows us to cut the tree to provide a set number of groups
+
+groups.3 = cutree(cars.hclust, k = 3) #cutting the tree into 3 groups
+
+table(groups.3) ##number of cars by group
+cars$Car[groups.3 == 1] ##Which cars are in cluster 1
+
+```
+
+```{r}
+
+table(groups.3, cars$Country) ##checking to see if there is an association between the 
+
+```
+
+```{r}
+##Characterize the clusters based on the original information on the cars.
+
+aggregate(cars[, -c(1,2)], list(groups.3), median)
+
+##use the cars data set (minus the first two rows), using the groups, calculate the median by group
+
+```
+
+## **_k_-means Clustering**
+
+```{r}
+##Utilizing the Western North America Climate Data set
+##Ensure the maps package is loaded (initial start script for this lab)
+##Read in the data.
+
+wnaclim = read.csv("../datafiles/wnaclim2.csv")
+
+wnaloc = cbind(wnaclim$Longitude, wnaclim$Latitude) #Combine the longitude and latitude into a new variable
+
+ngrp = 6 #number of groups for k-means clustering
+
+##Simple location map
+plot(wnaloc,
+     xlab = "Longitude",
+     ylab = "Latitude") ##basic scatterplot
+map(add = TRUE) ##adds the map to the current plot
+
+```
+
+```{r}
+##Extract the variables we need (temp and precip for all twelve months)
+
+wnaclim = wnaclim[ , seq(3,26)] ##new dataframe with the temp and precip variables
+wnaclim.s = scale(wnaclim) ##scale the data for clustering
+
+wna.kmeans = kmeans(wnaclim.s, ngrp, nstart = 50, iter.max = 20) #kmeans set up. nstart and iter.max?
+
+table(wna.kmeans$cluster)
+```
+
+```{r}
+##Plotting the distribution of k-means clusters
+
+mycol = rainbow(ngrp)
+plot(wnaloc,
+     xlab = "Longitude",
+     ylab = "Latitude",
+     main = "Western North America Climate Clusters",
+     pch = 16,
+     col = mycol[wna.kmeans$cluster])
+map(add =TRUE)
+
+
+```
+
+## **_k_-means Prototypes**
+
+```{r}
+#Prototypes are the centers of the clusters
+
+wna.kmeans$centers #scaled values
+
+
+```
+
+```{r}
+#Revert back to the original values using the aggregate function
+
+wna.centers <- aggregate(wnaclim, list(wna.kmeans$cluster), mean)
+wna.centers
+temp.centers <- wna.centers[ , 2:13]
+ppt.centers <- wna.centers[ , 14:25]
+
+
+```
+
+
+```{r}
+##Climatology plot for the clusters using matplot()
+
+matplot(t(temp.centers), type = 'l', lwd = 2, lty = 2, col = mycol,
+        xlab = "Month", ylab = "Temp C")
+matplot(t(ppt.centers), type = 'l', lwd = 2, lty = 2, col = mycol,
+        xlab = "Month", ylab = "PPT mm")
+
+#why transpose? If you dont, the figure will use the cluster row # as the x - axis**
+
+```
+
+## **Testing clustering solutions**
+
+```{r}
+#cluster package calculates the silhouette index
+#fpc pacakge calculates the Calinski-Harabasz index 
+#pacakges loaded at the beginning of this script
+
+calinhara(wnaclim.s, wna.kmeans$cluster)
+
+
+```
+
+
+```{r, messages = FALSE}
+
+sil.out = silhouette(wna.kmeans$cluster, dist(wnaclim.s))
+
+sil.out[1:4 , ] #rows 1 -4
+
+#this index is between 0-1, but my values are higher?***
+
+```
+
+
+```{r}
+
+mean(sil.out[ , 3])
+
+```
+
+```{r}
+
+tapply(sil.out[ , 3], sil.out[ , 1], mean)
+
+```
+
+
+```{r}
+##Saving to pdf - couldn't scale up in the original document
+pdf()
+plot(sil.out, col = mycol, main = "WNA Climate Silhoutte Plot")
+invisible(dev.off()) #suppresses the device off message in the html output
+
+```
+
+
+![Silhoutte Plot](~/Desktop/University of Utah PhD /Course Work/Fall 2022 Semester/GEOG6000_Data Analysis/lab07/Silhoutte_Plot2.png)
+
+
+```{r}
+#Trying the grid pacakage to embed the image
+
+library(grid)
+
+
+```
+
+
+## **Testing Different Cluster Numbers**
+
+
+```{r, warning =FALSE}
+
+source("cluster_num_script.r")
+
+```
+
+```{r}
+
+##Calinski-Harabasz Index Plot
+
+plot(1:20,ch.out, type = 'b', lwd = 2,
+     xlab = "N Groups", ylab = "C", main = "Calinski-Harabasz index")
+
+```
+
+```{r}
+#Silhoutte Plot
+
+plot(1:20, sil.out, type = 'b', lwd = 2,
+     xlab = "N Groups",
+     ylab = "C",
+     main = " Average Silhoutte Index")
+
+```
+
+# **Practice - Principle Component Analysis**
+
+```{r}
+
+state = read.csv("../datafiles/statedata.csv")
+
+state2 = state[ , -1] #remove the state names 
+
+rownames(state2) = state[ , 1] #sets the rownames by state instead of number. Essentially removes it as a variable
+
+```
+
+
+```{r}
+
+##the scale = true argument scales the data to account for a variety of units
+state.pca = prcomp(state2, scale = TRUE)
+
+summary(state.pca)
+
+```
+
+```{r}
+##Scaling the standard deviatioback up to the variance (which is the square of the SD)
+
+
+state.pca$sdev^2
+
+```
+
+```{r}
+##Visualization tool using a screeplot
+
+screeplot(state.pca)
+
+```
+
+```{r}
+##Rotation is the loadings between the individual variables and the new components
+
+## High values indicate greater association. Direction can be positive or negative
+
+state.pca$rotation
+
+##The loadings reflect both the strength and the direction of association (the direction of the eigenvectors), so life expectancy increases toward negative values of component 1, and area increases with positive values of component 2. We can use this to try and assign some meaning to the axes: e.g. axis 1 represents a social-economic gradient, and axis 2 is related the physical geography of the state.
+
+```
+
+```{r}
+##Site scores
+
+state.pca$x [ , 1:4]
+
+
+```
+
+```{r}
+
+#Sorting for gradients
+
+sort(state.pca$x[, 1])
+
+#sorting by PC1?
+
+```
+
+```{r}
+##Biplot for first two components
+
+biplot(state.pca, xlim = c(-0.4, 0.6))
+
+
+```
+
+```{r}
+
+biplot(state.pca, choices = c(1,3))
+
+
+```
+
+# **EXERCISES**
+
+## **1. Boston House Prices, Socio-Economic and Environmental Factors**
+
+### **1.1 _k_-means Cluster Analysis**
+
+```{r, cache = TRUE}
+##Boston Cluster Analysis
+
+boston = read.csv("../datafiles/boston6k.csv")
+boston.loc = cbind(boston$LON, boston$LAT)
+boston1 = boston[ , 9:21]
+
+##Scale the data
+boston1.s = scale(boston1)
+
+##Run the loop
+
+source("cluster_boston_script.r")
+
+##Results
+
+plot(1:20, sil.out2, type = "b",
+     lwd = 2,
+     xlab = "n Groups",
+     ylab = "Index Score",
+     main = "Average Silhoutte Score")
+
+
+
+```
+
+
+- Based on this plot, **two (2)** clusters give the optimal solution. 
+
+### **1.2 Interpretation**
+
+- Two clusters seem to be the optimal number of clusters given this output, however, I recommend using **six (6)** clusters to divide our data. Given the number of variables in this data set, we will likely miss spatial patterns if we limit our cluster analysis to only two groups. In the visualization below it appears that using only two groups gives us a spatial distribution between an urban center and the outlying urban area. Six clusters reveal a much more interesting pattern related to the underlying variables.  
+
+```{r, cache = TRUE}
+
+##Plotting 2 versus 6 clusters
+
+ngrp2 = 2
+ngrp6 = 6
+mycol2 = brewer.pal(ngrp6, name = "Accent") #Experimenting with different color palette
+
+boston.kmeans2 = kmeans(boston1.s, ngrp2, nstart = 50, iter.max = 20) ##Two groups
+boston.kmeans6 = kmeans(boston1.s, ngrp6, nstart = 50, iter.max = 20) ##Six groups
+
+par(mfrow = c(1,2))
+plot(boston.loc,
+     xlab = "Longitude",
+     ylab = "Latitude",
+     main = "Boston Housing Clusters (2)",
+     pch = 16,
+     col = alpha(mycol2[boston.kmeans2$cluster], 0.5))
+map(add =TRUE)
+
+plot(boston.loc,
+     xlab = "Longitude",
+     ylab = "Latitude",
+     main = "Boston Housing Clusters (6)",
+     pch = 16,
+     col = alpha(mycol2[boston.kmeans6$cluster], 0.5))
+map(add =TRUE)
+
+
+```
+
+### **1.3 _k_-means Re-run**
+
+```{r, cache = TRUE}
+
+##Output from the previous set of code used to help visualize the difference between two and 6 clusters
+
+boston.kmeans6
+
+```
+
+### **1.4 Median Table**
+
+```{r, cache = TRUE, warning = FALSE}
+
+##Convert the back to the unscaled data by cluster, then calculate the mean value by cluster. Included the original first few columns as well (primarily for median price columns)
+boston.kmeans6.centers = aggregate(boston, list(boston.kmeans6$cluster), mean)
+
+library(kableExtra)
+boston.kmeans6.centers %>%
+  kbl() %>%
+  kable_classic() %>%
+   scroll_box(width = "500px", height = "200px")
+
+
+```
+
+- The clusters seem to be divided primarily across crime rates, property tax rate, zoning, distance to employment centers, and socioeconomic factors. Unsurprisingly, cluster number 4 is home to the lower end of the socioeconomic bracket with low value homes, high-crime rates, and the lowest distance to employment centers. This is likely a lower-class urban center in Boston. 
+
+### **1.5 Mean Corrected House Value**
+
+```{r}
+value = cbind(boston.kmeans6.centers$Group.1, boston.kmeans6.centers$CMEDV)
+value2 = as.data.frame(value)
+colnames(value2) = c("Cluster", "Mean Corrected House Value")
+
+library(kableExtra)
+value2 %>%
+    kbl(caption = "House Value by Cluster") %>%
+    kable_classic( full_width = F)
+```
+
+
+### **1.6 Anova Test between Clusters**
+
+```{r, cache = TRUE}
+
+##Setting up a new data frame for the data the includes the cluster number
+
+boston.clus.df = data.frame(cluster = boston.kmeans6$cluster, boston)
+
+##Change the cluster ID to a character
+boston.clus.df$cluster = as.character(boston.clus.df$cluster) 
+
+clust.aov = aov(CMEDV ~ cluster, data = boston.clus.df)
+clust.aov.sum = summary(clust.aov)
+print.sum = print(clust.aov.sum)
+
+print.sum 
+
+```
+
+- The ANOVA produces a large _F_-statistic and a extremely small _p_-value which leads us to reject the null hypothesis that the house values are the same. In this case, we accept the alternative hypothesis that the house values are different among the clusters. 
+
+
+```{r, echo=FALSE}
+##Subsets aren't necessary
+#clus1 = subset(boston.clus.df, boston.clus.df$clclususter == "1")
+#clus2 = subset(boston.clus.df, boston.clus.df$cluster == "2")
+#clus3 = subset(boston.clus.df, boston.clus.df$cluster == "3")
+#clus4 = subset(boston.clus.df, boston.clus.df$cluster == "4")
+#clus5 = subset(boston.clus.df, boston.clus.df$cluster == "5")
+#clus6 = subset(boston.clus.df, boston.clus.df$cluster == "6")
+
+
+
+```
+
+
+
+## **2. Principle Component Analysis of Climate in WNA**
+
+### **2.1 PCA Analysis, Biplot, Screeplot**
+
+```{r}
+##Read in a new set of data to work with
+wna.pca.data = read.csv("../datafiles/wnaclim2.csv")
+
+##Use only the monthly temp and precip data
+
+wnaclim.temp.precip = wna.pca.data[ , 3:26]
+
+##PCA - scale = TRUE syntax scales the data
+wnaclim.pca = prcomp(wnaclim.temp.precip, scale = TRUE)
+
+```
+
+```{r}
+
+##Biplot
+
+par(mfrow = c(1,2))
+wna.biplot = biplot(wnaclim.pca)
+
+##Screeplot
+
+wna.scree = screeplot(wnaclim.pca)
+
+
+```
+
+### **2.2 Second PCA Variance**
+
+```{r}
+
+summary(wnaclim.pca)
+
+```
+
+- PC1 and PC2 account for approximately **83%** of the variance.
+
+### **2.3 Variable Loadings**
+
+```{r}
+
+## Look at the loadings for PC1 and PC2 (columns 1 and 2)
+
+wnaclim.pca$rotation[ , 1:2]
+
+
+```
+
+- The **February and March temperature** have high loadings (~0.28 & 0.27 respectively) on principle component 1. 
+
+- The **October and November precipitation** have high loadings (~0.29 & 0.28 respectively) on principle component 2.
+
+- Based on these loadings, we see that principle component 1 is largely a temperature gradient whereas principle component 2 is largely a precipitation gradient. This matches what we see in our ordination plot as well. 
+
+### **2.4 Mapping and Analysis of Axis 1**
+
+```{r}
+##PC1
+##Site scores plot
+
+##Set the score as a variable
+wnaclim.pca.score = wnaclim.pca$x[ , 1]
+
+##Map the score to location (long/lat)
+
+quilt.plot(wna.pca.data$Longitude, wna.pca.data$Latitude, wnaclim.pca.score)
+world(add = TRUE)
+
+```
+
+- PC1 is largely influenced by spring temperatures which is reflected in the spatial pattern in the map above. This map shows a latitudinal gradient which is consistent with the insolation and temperature patterns in North America. Additional, the coastal zone along the Pacific Northwest and west coast of Canada is representative of the moderating influence of the ocean. This spatial pattern of temperature agrees with our understanding of the temperature regime of North America.  
+
+### **2.5 Mapping and Analysis of Axis 2**
+
+```{r}
+##PC2
+##Set the score as a variable
+wnaclim.pca.score2 = wnaclim.pca$x[ , 2]
+
+##Map the score to location (long/lat)
+
+quilt.plot(wna.pca.data$Longitude, wna.pca.data$Latitude, wnaclim.pca.score2)
+world(add = TRUE)
+
+
+```
+
+- PC2 is largely influenced by fall precipitation which is reflected by the spatial pattern in the map above. The Pacific Northwest and west coast of Canada are dominated by a long period of precipitation beginning in the fall and lasting through the spring. This is a result of the oceanic influence on the precipitation regime in the area. The interior of North America has less precipitation due its more continental climate, however, this map likely does not take into account large amounts of orographic precipitation that occurs in more mountainous regimes. This needs to be confirmed by looking at the elevation values from where these observations were recorded from.   
+
+
+
+
+
+
+
+
+
